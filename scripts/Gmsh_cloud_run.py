@@ -27,8 +27,8 @@ OY = geompy.MakeVectorDXDYDZ(0, 1, 0)
 OZ = geompy.MakeVectorDXDYDZ(0, 0, 1)
 
 # 2. Import and Orient Spaceplane CAD
-BWB_Spaceplane_V1 = geompy.ImportSTEP("/home/user/Design_without_cavity_v1_20260806.step", False, True)
-geompy.Rotate(BWB_Spaceplane_V1, OY, -5.0 * math.pi / 180.0)
+BWB_Spaceplane_V1 = geompy.ImportSTEP("/home/pravin/Design_without_cavity_v1_20260806.step", False, True)
+geompy.Rotate(BWB_Spaceplane_V1, OZ, -5.0 * math.pi / 180.0)
 
 # 3. Create Far-Field Domain & Fluid Subtraction
 Cone_1 = geompy.MakeCone(O, OX, 13.000055, 39.000165, 53.0)
@@ -78,7 +78,7 @@ Gmsh_Parameters.Set2DAlgo(6)              # Frontal-Delaunay
 Gmsh_Parameters.Set3DAlgo(10)             # Parallel Delaunay (HXT)
 Gmsh_Parameters.SetIs2d(0)                # 3D Domain Flag
 Gmsh_Parameters.SetMinSize(0.0008)        # 0.8 mm Surface Resolution
-Gmsh_Parameters.SetMaxSize(0.15)           # 500 mm Farfield Limit
+Gmsh_Parameters.SetMaxSize(0.15)          # 150 mm Farfield Limit
 Gmsh_Parameters.SetMeshCurvatureSize(20)  # 20 Elements per 2*pi Arc
 Gmsh_Parameters.SetSmouthSteps(5)
 
