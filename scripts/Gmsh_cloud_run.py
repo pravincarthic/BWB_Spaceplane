@@ -103,7 +103,7 @@ isDone = Mesh_1.Compute()
 if isDone:
     print("Mesh generation succeeded. Exporting to Gmsh 2.2 format...")
     try:
-        Mesh_1.ExportGMSHIO(r'/home/user/Gmsh_without_cavities_AoA_neg5_20260811.msh', 'Gmsh 2.2', Mesh_1)
+        Mesh_1.ExportGMSHIO(r'/home/pravin/Gmsh_without_cavities_AoA_neg5_20260815.msh', 'Gmsh 2.2', Mesh_1)
         print("Export completed successfully.")
     except Exception as err:
         print(f"ExportGMSHIO failed: {err}")
