@@ -17,6 +17,7 @@ def create_mesh():
     # ========================================================================
     print("Step 1: Initializing Gmsh...")
     gmsh.initialize()
+    gmsh.option.setNumber("Mesh.RandomFactor", 1e-5)
     gmsh.model.add("BWB_Spaceplane_Mesh")
     gmsh.option.setNumber("General.NumThreads", 28)
     print("✓ Gmsh initialized\n")
