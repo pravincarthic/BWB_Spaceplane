@@ -2,12 +2,43 @@ import gmsh
 import math
 import os
 import sys
+import json
 
-def create_mesh():
+def load_config(config_file):
+    """Load gmsh parameters and file paths from config file."""
+    if not os.path.exists(config_file):
+        print(f"✗ Error: Config file not found: {config_file}")
+        return None
+    
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+        print(f"✓ Config loaded from: {config_file}\n")
+        return config
+    except json.JSONDecodeError as e:
+        print(f"✗ Error parsing config file: {e}")
+        return None
+    except Exception as e:
+        print(f"✗ Error reading config file: {e}")
+        return None
+
+def create_mesh(config_file='gmsh_config.json'):
     print("\n" + "="*80)
     print("BWB SPACEPLANE MESH GENERATION - TEMPLATE BASED")
     print("="*80 + "\n")
 
+    # Load configuration
+    config = load_config(config_file)
+    if config is None:
+        return False
+    
+    # Extract file paths
+    step_file = config.get('step_file')
+    output_path = config.get('output_file')
+    
+    # Extract gmsh parameters
+    gmsh_params = config.get('gmsh_parameters', {})
+    
     inlet_faces = []
     outlet_faces = []
     atmosphere_faces = []
@@ -17,16 +48,15 @@ def create_mesh():
     # ========================================================================
     print("Step 1: Initializing Gmsh...")
     gmsh.initialize()
-    gmsh.option.setNumber("Mesh.RandomFactor", 1e-5)
+    gmsh.option.setNumber("Mesh.RandomFactor", gmsh_params.get("Mesh.RandomFactor", 1e-5))
     gmsh.model.add("BWB_Spaceplane_Mesh")
-    gmsh.option.setNumber("General.NumThreads", 28)
+    gmsh.option.setNumber("General.NumThreads", gmsh_params.get("General.NumThreads", 28))
     print("✓ Gmsh initialized\n")
     
     # ========================================================================
     # 2. IMPORT GEOMETRY
     # ========================================================================
     print("Step 2: Importing STEP geometry...")
-    step_file = r"/home/pravin/plain_BWB/Design_without_cavity_v1_20260806.step"
     
     if not os.path.exists(step_file):
         print(f"✗ Error: File not found: {step_file}")
@@ -181,46 +211,44 @@ def create_mesh():
     
     # Check each assignment
     print("="*80)
-    print("FACE ASSIGNMENT VERIFICATION")
-    print("="*80 + "\n")
-    
-    all_assigned = set(solid_walls_faces + inlet_faces + outlet_faces + atmosphere_faces)
+    all_assigned = inlet_faces + outlet_faces + atmosphere_faces + solid_walls_faces
     all_invalid = []
     
-    print("SOLID WALLS:")
-    print("-" * 50)
-    for tag in sorted(solid_walls_faces):
-        if tag in model_surface_tags:
-            xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(2, tag)
-            size = max(xmax-xmin, ymax-ymin, zmax-zmin)
-            print(f"  ✓ Tag {tag:2d}: Size={size:7.2f}, X range: {xmin:7.2f}→{xmax:7.2f}, Y range: {ymin:7.2f}→{ymax:7.2f}, Z range: {zmin:7.2f}→{zmax:7.2f}")
-        else:
-            print(f"  ✗ Tag {tag:2d}: DOES NOT EXIST IN MODEL ⚠️")
-            all_invalid.append(tag)
+    if solid_walls_faces:
+        print("SOLID WALLS:")
+        print("-" * 50)
+        for tag in solid_walls_faces:
+            if tag in model_surface_tags:
+                xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(2, tag)
+                size = max(xmax-xmin, ymax-ymin, zmax-zmin)
+                print(f"  ✓ Tag {tag:2d}: Size={size:7.2f}, Y range: {ymin:7.2f}→{ymax:7.2f}, Z range: {zmin:7.2f}→{zmax:7.2f}")
+            else:
+                print(f"  ✗ Tag {tag:2d}: DOES NOT EXIST IN MODEL ⚠️")
+                all_invalid.append(tag)
     
-    print("\nINLET:")
-    print("-" * 50)
-    for tag in inlet_faces:
-        if tag in model_surface_tags:
-            xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(2, tag)
-            size = max(xmax-xmin, ymax-ymin, zmax-zmin)
-            x_center = (xmin + xmax) / 2
-            print(f"  ✓ Tag {tag:2d}: Size={size:7.2f}, Center X={x_center:7.2f}, Y range: {ymin:7.2f}→{ymax:7.2f}, Z range: {zmin:7.2f}→{zmax:7.2f}")
-        else:
-            print(f"  ✗ Tag {tag:2d}: DOES NOT EXIST IN MODEL ⚠️")
-            all_invalid.append(tag)
+    if inlet_faces:
+        print("\nINLET:")
+        print("-" * 50)
+        for tag in inlet_faces:
+            if tag in model_surface_tags:
+                xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(2, tag)
+                size = max(xmax-xmin, ymax-ymin, zmax-zmin)
+                print(f"  ✓ Tag {tag:2d}: Size={size:7.2f}, Y range: {ymin:7.2f}→{ymax:7.2f}, Z range: {zmin:7.2f}→{zmax:7.2f}")
+            else:
+                print(f"  ✗ Tag {tag:2d}: DOES NOT EXIST IN MODEL ⚠️")
+                all_invalid.append(tag)
     
-    print("\nOUTLET:")
-    print("-" * 50)
-    for tag in outlet_faces:
-        if tag in model_surface_tags:
-            xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(2, tag)
-            size = max(xmax-xmin, ymax-ymin, zmax-zmin)
-            x_center = (xmin + xmax) / 2
-            print(f"  ✓ Tag {tag:2d}: Size={size:7.2f}, Center X={x_center:7.2f}, Y range: {ymin:7.2f}→{ymax:7.2f}, Z range: {zmin:7.2f}→{zmax:7.2f}")
-        else:
-            print(f"  ✗ Tag {tag:2d}: DOES NOT EXIST IN MODEL ⚠️")
-            all_invalid.append(tag)
+    if outlet_faces:
+        print("\nOUTLET:")
+        print("-" * 50)
+        for tag in outlet_faces:
+            if tag in model_surface_tags:
+                xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(2, tag)
+                size = max(xmax-xmin, ymax-ymin, zmax-zmin)
+                print(f"  ✓ Tag {tag:2d}: Size={size:7.2f}, Y range: {ymin:7.2f}→{ymax:7.2f}, Z range: {zmin:7.2f}→{zmax:7.2f}")
+            else:
+                print(f"  ✗ Tag {tag:2d}: DOES NOT EXIST IN MODEL ⚠️")
+                all_invalid.append(tag)
     
     if atmosphere_faces:
         print("\nATMOSPHERE:")
@@ -278,30 +306,32 @@ def create_mesh():
     print("\n" + "="*80 + "\n")
 
     # ========================================================================
-    # 9. MESH PARAMETERS - FROM EXISTING MESH TEMPLATE
+    # 9. MESH PARAMETERS - FROM CONFIG FILE
     # ========================================================================
-    print("Step 9: Setting mesh parameters (from existing mesh template)...")
+    print("Step 9: Setting mesh parameters (from config file)...")
     
     # Element size
-    gmsh.option.setNumber("Mesh.MeshSizeMin", 0.002)
-    gmsh.option.setNumber("Mesh.MeshSizeMax", 0.15)
-    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 24)
+    gmsh.option.setNumber("Mesh.MeshSizeMin", gmsh_params.get("Mesh.MeshSizeMin", 0.002))
+    gmsh.option.setNumber("Mesh.MeshSizeMax", gmsh_params.get("Mesh.MeshSizeMax", 0.15))
+    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", gmsh_params.get("Mesh.MeshSizeFromCurvature", 24))
     
     # Algorithms
-    gmsh.option.setNumber("Mesh.Algorithm", 6)        # 2D: Frontal-Delaunay
-    gmsh.option.setNumber("Mesh.Algorithm3D", 10)     # 3D: HXT Parallel Delaunay
+    gmsh.option.setNumber("Mesh.Algorithm", gmsh_params.get("Mesh.Algorithm", 6))
+    gmsh.option.setNumber("Mesh.Algorithm3D", gmsh_params.get("Mesh.Algorithm3D", 10))
     
     # Quality
-    gmsh.option.setNumber("Mesh.Smoothing", 5)        # Smoothing passes
-    gmsh.option.setNumber("Mesh.ElementOrder", 1)     # Linear elements
-    gmsh.option.setNumber("General.Terminal", 1)      # Verbose output
+    gmsh.option.setNumber("Mesh.Smoothing", gmsh_params.get("Mesh.Smoothing", 5))
+    gmsh.option.setNumber("Mesh.ElementOrder", gmsh_params.get("Mesh.ElementOrder", 1))
+    gmsh.option.setNumber("General.Terminal", gmsh_params.get("General.Terminal", 1))
     
     print("✓ Mesh parameters set\n")
     
     # ========================================================================
-    # 10. VISCOUS LAYER INFLATION - FROM EXISTING MESH
+    # 10. VISCOUS LAYER INFLATION - FROM CONFIG
     # ========================================================================
     print("Step 10: Configuring viscous boundary layers...")
+    
+    bl_params = config.get('boundary_layer_parameters', {})
     
     bl_field = gmsh.model.mesh.field.add("BoundaryLayer")
     gmsh.model.occ.synchronize()
@@ -321,15 +351,15 @@ def create_mesh():
     
     if all_edges:
         gmsh.model.mesh.field.setNumbers(bl_field, "EdgesList", all_edges)
-        gmsh.model.mesh.field.setNumber(bl_field, "Size", 0.002)
-        gmsh.model.mesh.field.setNumber(bl_field, "Thickness", 0.0118)
-        gmsh.model.mesh.field.setNumber(bl_field, "Ratio", 1.16)
-        gmsh.model.mesh.field.setNumber(bl_field, "NbLayers", 45)
+        gmsh.model.mesh.field.setNumber(bl_field, "Size", bl_params.get("Size", 0.002))
+        gmsh.model.mesh.field.setNumber(bl_field, "Thickness", bl_params.get("Thickness", 0.0118))
+        gmsh.model.mesh.field.setNumber(bl_field, "Ratio", bl_params.get("Ratio", 1.16))
+        gmsh.model.mesh.field.setNumber(bl_field, "NbLayers", bl_params.get("NbLayers", 45))
         gmsh.model.mesh.field.setAsBackgroundMesh(bl_field)
         print("✓ Viscous layers configured:")
-        print("    - Thickness: 0.0118")
-        print("    - Stretch ratio: 1.16")
-        print("    - Number of layers: 45\n")
+        print(f"    - Thickness: {bl_params.get('Thickness', 0.0118)}")
+        print(f"    - Stretch ratio: {bl_params.get('Ratio', 1.16)}")
+        print(f"    - Number of layers: {bl_params.get('NbLayers', 45)}\n")
     else:
         print("✗ No edges found for boundary layers\n")
     
@@ -348,12 +378,10 @@ def create_mesh():
         mesh_success = False
     
     # ========================================================================
-    # 12. EXPORT - SAME FORMAT AS EXISTING MESH
+    # 12. EXPORT
     # ========================================================================
     if mesh_success:
         print("Step 12: Exporting mesh...")
-        
-        output_path = r'/home/pravin/plain_BWB/Gmsh_without_cavities_AoA_neg5_20260815.msh'
         
         try:
             # Use Gmsh 2.2 format (legacy, same as existing mesh)
@@ -399,5 +427,7 @@ def create_mesh():
 
 
 if __name__ == "__main__":
-    success = create_mesh()
+    # You can optionally pass a custom config file path
+    config_file = sys.argv[1] if len(sys.argv) > 1 else 'gmsh_config.json'
+    success = create_mesh(config_file)
     sys.exit(0 if success else 1)
