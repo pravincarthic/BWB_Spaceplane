@@ -15,9 +15,7 @@ startTime       0;
 
 stopAt          endTime;
 
-// PLACEHOLDER: adjust to your required flow-through time / statistics
-// window. A rough guess for a body length L: t_flowthrough ~ few*L/u_inf,
-// u_inf = 3169.7 m/s. Set once you know your reference length.
+// PLACEHOLDER: adjust to your required flow-through time / statistics window. A rough guess for a body length L: t_flowthrough ~ few*L/u_inf, u_inf = 3169.7 m/s. Set once you know your reference length.
 endTime         0.02;
 
 deltaT          1e-9;         // initial guess, overridden by adjustTimeStep
@@ -39,9 +37,9 @@ runTimeModifiable true;
 // Adaptive timestepping: essential given the mu(T) viscosity jump across
 // the bow shock and the fine wall-resolved (y+<1) prism layer cells.
 adjustTimeStep  yes;
-maxCo           0.5;         // conservative given complex/extreme shock-shock
+maxCo           0.4;         // conservative given complex/extreme shock-shock
                               // interaction expected near leading edges
-maxDeltaT       1e-5;
+maxDeltaT       3e-7;
 
 // REQUIRED - confirmed against genericCase/system/controlDict in the real
 // repo: hy2Foam needs this custom finite-volume library loaded at runtime.
@@ -49,9 +47,7 @@ libs ("libstrathFiniteVolume.so");
 
 functions
 {
-    // PLACEHOLDER: add forces/forceCoeffs, probes at leading-edge/control
-    // surface locations, and residual monitoring once patch names are
-    // confirmed from the converted mesh (constant/polyMesh/boundary).
+    // PLACEHOLDER: add forces/forceCoeffs, probes at leading-edge/control surface locations, and residual monitoring once patch names are confirmed from the converted mesh (constant/polyMesh/boundary).
 }
 
 // ************************************************************************* //
