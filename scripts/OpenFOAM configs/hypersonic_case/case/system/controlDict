@@ -16,9 +16,9 @@ startTime       0;
 stopAt          endTime;
 
 // PLACEHOLDER: adjust to your required flow-through time / statistics window. A rough guess for a body length L: t_flowthrough ~ few*L/u_inf, u_inf = 3169.7 m/s. Set once you know your reference length.
-endTime         0.02;
+endTime         0.03;
 
-deltaT          1e-9;         // initial guess, overridden by adjustTimeStep
+deltaT          1e-7;         // initial guess, overridden by adjustTimeStep
 
 writeControl    adjustableRunTime;
 writeInterval   1e-4;
@@ -26,7 +26,7 @@ writeInterval   1e-4;
 purgeWrite      0;
 
 writeFormat     binary;
-writePrecision  8;
+writePrecision  10;
 writeCompression off;
 
 timeFormat      general;
@@ -34,15 +34,12 @@ timePrecision   8;
 
 runTimeModifiable true;
 
-// Adaptive timestepping: essential given the mu(T) viscosity jump across
-// the bow shock and the fine wall-resolved (y+<1) prism layer cells.
+// Adaptive timestepping: essential given the mu(T) viscosity jump across the bow shock and the fine wall-resolved (y+<1) prism layer cells.
 adjustTimeStep  yes;
-maxCo           0.4;         // conservative given complex/extreme shock-shock
-                              // interaction expected near leading edges
+maxCo           0.4;         // conservative given complex/extreme shock-shock interaction expected near leading edges, change to 0.2 if crashes occur
 maxDeltaT       3e-7;
 
-// REQUIRED - confirmed against genericCase/system/controlDict in the real
-// repo: hy2Foam needs this custom finite-volume library loaded at runtime.
+// REQUIRED - confirmed against genericCase/system/controlDict in the real repo: hy2Foam needs this custom finite-volume library loaded at runtime.
 libs ("libstrathFiniteVolume.so");
 
 functions
@@ -57,9 +54,9 @@ functions
         patches         (wall);
         rho             rhoInf;
         rhoInf          1.225;      // freestream density at 130,000 ft
-        CofR            (25 0 0);   // center of rotation - adjust to vehicle CoG
-        lRef            49.585;     // reference length (vehicle nose-to-tail)
-        Aref            0.1;        // reference area - ADJUST to your vehicle planform
+        CofR            (25.784 -2.256 0.769);   // center of rotation - adjust to vehicle CoM
+        lRef            49.585;     // Reference length (vehicle nose-to-tail) in m
+        Aref            0.1;        // Change to real value in m^2 as seen in a CAD viewer from the top view
     }
     
     forceCoeffs
