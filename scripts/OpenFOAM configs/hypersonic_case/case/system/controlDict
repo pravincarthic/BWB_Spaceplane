@@ -47,7 +47,46 @@ libs ("libstrathFiniteVolume.so");
 
 functions
 {
-    // PLACEHOLDER: add forces/forceCoeffs, probes at leading-edge/control surface locations, and residual monitoring once patch names are confirmed from the converted mesh (constant/polyMesh/boundary).
+    forces
+    {
+        type            forces;
+        libs            ("libforces.so");
+        writeControl    adjustableRunTime;
+        writeInterval   1e-4;
+        
+        patches         (wall);
+        rho             rhoInf;
+        rhoInf          1.225;      // freestream density at 130,000 ft
+        CofR            (25 0 0);   // center of rotation - adjust to vehicle CoG
+        lRef            49.585;     // reference length (vehicle nose-to-tail)
+        Aref            0.1;        // reference area - ADJUST to your vehicle planform
+    }
+    
+    forceCoeffs
+    {
+        type            forceCoeffs;
+        libs            ("libforces.so");
+        writeControl    adjustableRunTime;
+        writeInterval   1e-4;
+        
+        patches         (wall);
+        rho             rhoInf;
+        rhoInf          1.225;
+        CofR            (25 0 0);
+        lRef            49.585;
+        Aref            0.1;        // reference area - ADJUST
+        
+        magUInf         3169.7;     // freestream velocity magnitude
+        liftDir         (0 0 1);    // lift direction (Z, normal to flow)
+        dragDir         (1 0 0);    // drag direction (X, flow-aligned)
+    }
+    
+    fieldMinMax
+    {
+        type            fieldMinMax;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    adjustableRunTime;
+        writeInterval   1e-4;
+        fields          (p Tt Tv);
+    }
 }
-
-// ************************************************************************* //
