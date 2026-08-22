@@ -1,0 +1,402 @@
+
+================================================================================
+BWB SPACEPLANE MESH GENERATION - TEMPLATE BASED
+================================================================================
+
+[OK] Config loaded from: gmsh_config_sizefield.json
+
+Step 1: Initializing Gmsh...
+[OK] Gmsh initialized
+
+Step 2: Importing STEP geometry...
+Info    :  - Label 'Shapes/BWB Spaceplane V2/Spaceplane:1/Spaceplane' (3D)
+Info    :  - Color (0.188235, 0.231373, 0.588235) (3D & Surfaces)
+[OK] STEP file imported
+
+Step 3: Extracting spaceplane volume...
+[OK] Spaceplane volume tag: 1
+
+Step 4: Rotating spaceplane (-5.0 deg around Z-axis)...
+Step 6b: Exporting pre-mesh geometry for inspection...
+Info    : Writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.1.step'...
+
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+******        Transferring Shape, ShapeType = 0                      ******
+** WorkSession : Sending all data
+ Step File Name : D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.1.step(1194 ents)  Write  Done
+Info    : Done writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.1.step'
+  [OK] Geometry exported: D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.1.step
+    Size: 71.9 KB
+    Includes both the fluid domain AND a separate copy of the
+    spaceplane solid (volume(s) ), so the
+    aircraft shape is visible directly, not just as a hidden cavity.
+    Open this in SALOME (File > Import > STEP) to inspect the cuts
+    and thickened features before meshing.
+
+[OK] Spaceplane rotated
+
+
+================================================================================
+GEOMETRY ANALYSIS: 14 SURFACES DETECTED
+================================================================================
+Raw Face Tags: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+
+Index  | Tag   | Center of Mass (X, Y, Z)         | Dimensions (delta-X x delta-Y x delta-Z)
+--------------------------------------------------------------------------------
+#1     | 1     | (48861.04, 14077.04, 14.27)      | 1359.73 x 1088.24 x 116.30  
+       - Span Limits: X=[48282.8 -> 49642.5], Y=[13124.8 -> 14213.0], Z=[-22.3 -> 94.0]
+--------------------------------------------------------------------------------
+#2     | 2     | (48122.09, -4210.14, -17.55)     | 3033.22 x 34669.82 x 9.47   
+       - Span Limits: X=[46605.5 -> 49638.7], Y=[-21545.0 -> 13124.8], Z=[-22.3 -> -12.8]
+--------------------------------------------------------------------------------
+#3     | 3     | (34609.10, -3027.90, 993.62)     | 36690.67 x 36671.82 x 2590.90
+       - Span Limits: X=[12951.8 -> 49642.5], Y=[-22458.8 -> 14213.0], Z=[-12.8 -> 2578.1]
+--------------------------------------------------------------------------------
+#4     | 4     | (45674.28, -22347.81, 14.27)     | 1512.74 x 913.76 x 116.30   
+       - Span Limits: X=[45092.7 -> 46605.5], Y=[-22458.8 -> -21545.0], Z=[-22.3 -> 94.0]
+--------------------------------------------------------------------------------
+#5     | 5     | (33139.05, -15133.33, 500.86)    | 18574.35 x 11160.59 x 1561.37
+       - Span Limits: X=[26518.4 -> 45092.7], Y=[-22315.8 -> -11155.2], Z=[-22.3 -> 1539.1]
+--------------------------------------------------------------------------------
+#6     | 6     | (35263.47, 9148.88, 500.86)      | 20230.18 x 7765.64 x 1561.37
+       - Span Limits: X=[28052.6 -> 48282.8], Y=[6380.9 -> 14146.5], Z=[-22.3 -> 1539.1]
+--------------------------------------------------------------------------------
+#7     | 7     | (32754.60, -2865.66, -22.29)     | 49565.79 x 36671.82 x 0.00  
+       - Span Limits: X=[76.7 -> 49642.5], Y=[-22458.8 -> 14213.0], Z=[-22.3 -> -22.3]
+--------------------------------------------------------------------------------
+#8     | 8     | (14553.08, -6230.80, 1004.39)    | 25551.69 x 10855.77 x 2622.30
+       - Span Limits: X=[57.4 -> 25609.1], Y=[-10928.0 -> -72.2], Z=[-22.3 -> 2600.0]
+--------------------------------------------------------------------------------
+#9     | 9     | (26054.50, -11064.61, 775.83)    | 909.34 x 227.25 x 1630.05   
+       - Span Limits: X=[25609.1 -> 26518.4], Y=[-11155.2 -> -10928.0], Z=[-22.3 -> 1607.8]
+--------------------------------------------------------------------------------
+#10    | 10    | (7321.60, -640.56, 1601.36)      | 11294.91 x 7280.25 x 2399.37
+       - Span Limits: X=[72.6 -> 11367.5], Y=[-4606.8 -> 2673.5], Z=[17.3 -> 2416.6]
+--------------------------------------------------------------------------------
+#11    | 11    | (12223.76, -1069.44, 2555.12)    | 3053.40 x 8967.65 x 183.39  
+       - Span Limits: X=[10665.5 -> 13718.9], Y=[-5550.5 -> 3417.1], Z=[2416.6 -> 2600.0]
+--------------------------------------------------------------------------------
+#12    | 12    | (69.81, -6.11, -3.82)            | 32.73 x 148.08 x 39.54      
+       - Span Limits: X=[56.8 -> 89.5], Y=[-80.4 -> 67.6], Z=[-22.3 -> 17.3]
+--------------------------------------------------------------------------------
+#13    | 13    | (15413.95, 3609.03, 1004.39)     | 27048.58 x 6253.84 x 2622.30
+       - Span Limits: X=[69.0 -> 27117.6], Y=[61.2 -> 6315.0], Z=[-22.3 -> 2600.0]
+--------------------------------------------------------------------------------
+#14    | 14    | (27580.02, 6372.20, 775.83)      | 934.99 x 77.11 x 1630.05    
+       - Span Limits: X=[27117.6 -> 28052.6], Y=[6315.0 -> 6392.1], Z=[-22.3 -> 1607.8]
+--------------------------------------------------------------------------------
+Step 4a: SKIPPED (enable_thin_feature_enforcement=false in config) - using the spaceplane's raw imported geometry, unmodified.
+
+Step 5: Creating cuboid far-field domain...
+Step 6b: Exporting pre-mesh geometry for inspection...
+Info    : Writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.2.step'...
+
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+******        Transferring Shape, ShapeType = 0                      ******
+** WorkSession : Sending all data
+ Step File Name : D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.2.step(1570 ents)  Write  Done
+Info    : Done writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.2.step'
+  [OK] Geometry exported: D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.2.step
+    Size: 89.8 KB
+    Includes both the fluid domain AND a separate copy of the
+    spaceplane solid (volume(s) ), so the
+    aircraft shape is visible directly, not just as a hidden cavity.
+    Open this in SALOME (File > Import > STEP) to inspect the cuts
+    and thickened features before meshing.
+
+[OK] Far-field volume confirmed, tag: 2
+  Bounding box: X=[-50000.0,150000.0] Y=[-100000.0,100000.0] Z=[-100000.0,100000.0]
+  Fully envelopes the original cone (outlet radius 100000mm used uniformly)
+  Distinct from spaceplane (tag(s) [1]). No curved surfaces - flat
+  planar faces only, structurally immune to every failure mode found on the cuboid construction.
+
+Step 6: Cutting spaceplane from cuboid (fluid domain)...
+[OK] Boolean cut complete, fluid volume(s): [2]
+
+Step 6b: Exporting pre-mesh geometry for inspection...
+Info    : Writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.3.step'...
+
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+******        Transferring Shape, ShapeType = 0                      ******
+** WorkSession : Sending all data
+ Step File Name : D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.3.step(2744 ents)  Write  Done
+Info    : Done writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.3.step'
+  [OK] Geometry exported: D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step.3.step
+    Size: 162.2 KB
+    Includes both the fluid domain AND a separate copy of the
+    spaceplane solid (volume(s) ), so the
+    aircraft shape is visible directly, not just as a hidden cavity.
+    Open this in SALOME (File > Import > STEP) to inspect the cuts
+    and thickened features before meshing.
+
+Step 6a: Removing duplicate/coincident faces before meshing...
+  [OK] No duplicate surfaces found (34 surfaces unchanged)
+  Fluid domain now spans volume(s): [2, 3]
+
+Step 6b: Exporting pre-mesh geometry for inspection...
+Info    : Writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step'...
+
+*******************************************************************
+******        Statistics on Transfer (Write)                 ******
+
+*******************************************************************
+******        Transfer Mode = 0  I.E.  As Is       ******
+******        Transferring Shape, ShapeType = 0                      ******
+** WorkSession : Sending all data
+ Step File Name : D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step(2744 ents)  Write  Done
+Info    : Done writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step'
+  [OK] Geometry exported: D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Geometry_precut_AoA_neg5_20260821.step
+    Size: 162.2 KB
+    Includes both the fluid domain AND a separate copy of the
+    spaceplane solid (volume(s) [3]), so the
+    aircraft shape is visible directly, not just as a hidden cavity.
+    Open this in SALOME (File > Import > STEP) to inspect the cuts
+    and thickened features before meshing.
+
+  [OK] Removed spaceplane inspection copy (volume(s) [3]) - not part of the fluid mesh
+  Fluid domain now spans volume(s): [2]
+
+Step 7: Creating physical groups from surfaces and volumes...
+[OK] Physical groups created
+
+Step 8: Verifying boundary face assignments...
+Solid walls: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+Inlet: [35]
+Outlet: [40]
+Atmosphere: [36, 37, 38, 39]
+
+Total surfaces in model: 20
+All surface tags: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 35, 36, 37, 38, 39, 40]
+
+[OK] No unassigned surfaces
+
+================================================================================
+
+Step 9: Setting mesh parameters (from config file)...
+  [OK] Mesh.Algorithm3D = 10 (from config)
+[OK] Mesh parameters set (as global bounds; size field is primary control)
+
+Step 9a: Building spatially-varying size field...
+Setting up spatially-varying mesh size field...
+
+  size_near = 2 mm  (at the aircraft surface)
+  size_far  = 1000 mm  (far-field / near the cone)
+  dist_min  = 200 mm  (ramp starts)
+  dist_max  = 20000 mm  (ramp ends)
+
+  [OK] Distance field 1 created from 14 solid wall surfaces
+  [OK] Threshold field 2 created (fine near geometry, coarse far away)
+
+[OK] Background mesh field set (field id 2)
+
+Step 10: Configuring viscous boundary layers...
+  Found 36 boundary layer edges
+[OK] Viscous layers configured:
+    - Thickness: 40
+    - Stretch ratio: 1.15
+    - Number of layers: 35
+
+Step 11: Generating 3D mesh (HXT)...
+  This may take several minutes...
+
+Info    : Meshing 1D...
+Info    : [  0%] Meshing curve 2 (Line)
+Info    : [  0%] Meshing curve 7 (Line)
+Info    : [  0%] Meshing curve 3 (Circle)
+Info    : [  0%] Meshing curve 9 (Ellipse)
+Info    : [  0%] Meshing curve 13 (Ellipse)
+Info    : [  0%] Meshing curve 4 (Line)
+Info    : [  0%] Meshing curve 10 (Line)
+Info    : [  0%] Meshing curve 12 (Line)
+Info    : [  0%] Meshing curve 6 (Line)
+Info    : [  0%] Meshing curve 14 (Line)
+Info    : [  0%] Meshing curve 11 (Line)
+Info    : [  0%] Meshing curve 1 (Ellipse)
+Info    : [  0%] Meshing curve 8 (Line)
+Info    : [  0%] Meshing curve 5 (Line)
+Info    : [  0%] Meshing curve 15 (Ellipse)
+Info    : [  0%] Meshing curve 16 (Circle)
+Info    : [ 10%] Meshing curve 17 (Line)
+Info    : [ 10%] Meshing curve 18 (Line)
+Info    : [ 10%] Meshing curve 19 (Line)
+Info    : [ 10%] Meshing curve 20 (Line)
+Info    : [ 10%] Meshing curve 21 (Line)
+Info    : [ 20%] Meshing curve 22 (Circle)
+Info    : [ 20%] Meshing curve 23 (Line)
+Info    : [ 20%] Meshing curve 24 (Line)
+Info    : [ 20%] Meshing curve 25 (Line)
+Info    : [ 20%] Meshing curve 26 (Circle)
+Info    : [ 20%] Meshing curve 27 (Ellipse)
+Info    : [ 20%] Meshing curve 28 (Line)
+Info    : [ 20%] Meshing curve 29 (Ellipse)
+Info    : [ 20%] Meshing curve 30 (Line)
+Info    : [ 20%] Meshing curve 31 (Line)
+Info    : [ 20%] Meshing curve 32 (Line)
+Info    : [ 40%] Meshing curve 33 (Line)
+Info    : [ 40%] Meshing curve 34 (Ellipse)
+Info    : [ 40%] Meshing curve 35 (Ellipse)
+Info    : [ 40%] Meshing curve 36 (Line)
+Info    : [ 40%] Meshing curve 85 (Line)
+Info    : [ 40%] Meshing curve 86 (Line)
+Info    : [ 40%] Meshing curve 87 (Line)
+Info    : [ 40%] Meshing curve 88 (Line)
+Info    : [ 60%] Meshing curve 89 (Line)
+Info    : [ 60%] Meshing curve 90 (Line)
+Info    : [ 60%] Meshing curve 91 (Line)
+Info    : [ 60%] Meshing curve 92 (Line)
+Info    : [ 60%] Meshing curve 93 (Line)
+Info    : [ 60%] Meshing curve 94 (Line)
+Info    : [ 60%] Meshing curve 95 (Line)
+Info    : [ 80%] Meshing curve 96 (Line)
+Info    : Done meshing 1D (Wall 0.0311742s, CPU 0.21875s)
+Info    : Meshing 2D...
+Info    : [  0%] Meshing surface 14 (Cylinder, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 3 (Plane, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 5 (Plane, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 8 (Plane, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 7 (Plane, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 2 (Plane, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 11 (Cylinder, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 9 (Cylinder, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 13 (Plane, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 10 (Plane, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 4 (Cylinder, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 12 (Cylinder, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 1 (Cylinder, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 6 (Plane, Frontal-Delaunay)
+Info    : [  0%] Meshing surface 35 (Plane, Frontal-Delaunay)
+Info    : [ 20%] Meshing surface 36 (Plane, Frontal-Delaunay)
+Info    : [ 20%] Meshing surface 37 (Plane, Frontal-Delaunay)
+Info    : [ 20%] Meshing surface 38 (Plane, Frontal-Delaunay)
+Info    : [ 20%] Meshing surface 39 (Plane, Frontal-Delaunay)
+Info    : [ 20%] Meshing surface 40 (Plane, Frontal-Delaunay)
+Info    : Done meshing 2D (Wall 7.18232s, CPU 43.4688s)
+Info    : Meshing 3D...
+Info    : 3D Meshing 1 volume with 1 connected component
+Info    : Input mesh hash f36fadef8ac077b8
+Info    : Creating an empty mesh with 280294 vertices
+Info    : Initialization of tet. mesh
+Info    : Delaunay of     280290 points on  14 threads - mesh.nvert: 4         
+Info    : Recovering 25 missing facet(s)
+Info    : Recover Delaunay
+Info    : 1 out of 2 volumes will be refined
+Info    : All volumes of the BRep were found and colorized accordingly
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of     816546 points on  14 threads - mesh.nvert: 280294    
+Info    :           -     707258 points filtered
+Info    :           =     109288 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of    1212965 points on  14 threads - mesh.nvert: 389582    
+Info    :           -     889196 points filtered
+Info    :           =     323769 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of    2153899 points on  14 threads - mesh.nvert: 713351    
+Info    :           -    1454391 points filtered
+Info    :           =     699508 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of    2930332 points on  14 threads - mesh.nvert: 1412859   
+Info    :           -    1747643 points filtered
+Info    :           =    1182689 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of    3841892 points on  14 threads - mesh.nvert: 2595548   
+Info    :           -    2460168 points filtered
+Info    :           =    1381724 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of    2216995 points on  14 threads - mesh.nvert: 3977272   
+Info    :           -    1421196 points filtered
+Info    :           =     795799 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of     378230 points on  14 threads - mesh.nvert: 4773071   
+Info    :           -     182030 points filtered
+Info    :           =     196200 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of      32575 points on   8 threads - mesh.nvert: 4969271   
+Info    :           -       9043 points filtered
+Info    :           =      23532 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of       1788 points on   1 threads - mesh.nvert: 4992803   
+Info    :           -        373 points filtered
+Info    :           =       1415 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of         78 points on   1 threads - mesh.nvert: 4994218   
+Info    :           -         16 points filtered
+Info    :           =         62 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Delaunay of          3 points on   1 threads - mesh.nvert: 4994280   
+Info    :           -          1 points filtered
+Info    :           =          2 points added
+Info    : Computing mesh sizes...
+Info    : Done computing mesh sizes
+Info    : Improving    1046050 tet. on  14 thrd (S & ER)
+Info    : Improving      35408 tet. on  14 thrd (S & ER)
+Info    : Improving       8431 tet. on  14 thrd (S & ER)
+Info    : Improving       6799 tet. on  14 thrd (S & ER)
+Info    : Improving       6659 tet. on  14 thrd (S & ER)
+Info    : Improving       6638 tet. on  14 thrd (GSC)
+Info    : Improving       1028 tet. on  14 thrd (S & ER)
+Info    : Improving        906 tet. on  14 thrd (S & ER)
+Info    : Improving        899 tet. on  14 thrd (S & ER)
+Info    : Improving        896 tet. on  14 thrd (GSC)
+Info    : Improving        871 tet. on  14 thrd (S & ER)
+Info    : Improving        870 tet. on  14 thrd (S & ER)
+Info    : Improving        870 tet. on  14 thrd (GSC)
+Info    : Improving        873 tet. on  14 thrd (S & ER)
+Info    : Improving        876 tet. on  14 thrd (S & ER)
+Info    : Improving        872 tet. on  14 thrd (S & ER)
+Info    : Improving        872 tet. on  14 thrd (GSC)
+Info    : Improving        872 tet. on  14 thrd (S & ER)
+Info    :  	Final tet. mesh contains 31016477 tetrahedra
+Info    :  	Final tet. mesh contains 4994282 vertices
+Info    : tEmptyMesh  	 = 	    0.778
+Info    : tVerifyBnd  	 = 	    0.062
+Info    : tBndRecovery	 = 	    3.322
+Info    : tConvertMesh	 = 	    0.116
+Info    : tRefine     	 = 	   41.676
+Info    : tOptimize   	 = 	    3.173
+Info    : Done meshing 3D (Wall 55.6632s, CPU 135.438s)
+Info    : 4994282 nodes 31016498 elements
+[OK] Mesh generation complete
+
+Step 12: Exporting mesh...
+Info    : Writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Gmsh_without_cavities_AoA_neg5_20260821.msh'...
+Info    : Done writing 'D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Gmsh_without_cavities_AoA_neg5_20260821.msh'
+[OK] Mesh exported successfully
+  File: D:\BWB Spaceplane\Meshing Scripts\v2_cleaned\Gmsh_without_cavities_AoA_neg5_20260821.msh
+  Size: 1740.98 MB
+
+Step 13: Finalizing...
+[OK] Done
+
+================================================================================
+MESH GENERATION SUCCESSFUL
+================================================================================
+
+Next steps:
+  1. Verify mesh quality in Gmsh GUI
+  2. Check that inlet/outlet are correctly assigned
+  3. Import mesh into your CFD solver
+================================================================================
+
