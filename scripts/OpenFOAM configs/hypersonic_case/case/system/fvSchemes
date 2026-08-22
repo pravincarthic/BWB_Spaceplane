@@ -70,7 +70,7 @@ interpolationSchemes
 {
     default          linear;
     reconstruct(rho) vanLeer;
-    reconstruct(U)   MinmodV;     // U only - minmod, per your request
+    reconstruct(U)   MinmodV;     // U only - minmod
     reconstruct(T)   vanLeer;
 }
 
