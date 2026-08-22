@@ -1,24 +1,50 @@
 {
-  "step_file": "/home/pravin/plain_BWB/Design_without_cavity_v1_20260806.step",
-  "output_file": "/home/pravin/plain_BWB/Gmsh_without_cavities_AoA_neg5_20260815.msh",
-  
+  "step_file": "D:\\BWB Spaceplane\\Design\\BWB_Spaceplane_V2_20260822.stp",
+  "output_file": "D:\\BWB Spaceplane\\Meshing Scripts\\v2_cleaned\\Gmsh_without_cavities_AoA_neg5_20260822.msh",
+  "export_geometry_path": "D:\\BWB Spaceplane\\Meshing Scripts\\v2_cleaned\\Geometry_precut_AoA_neg5_20260822.step",
+
   "gmsh_parameters": {
     "Mesh.RandomFactor": 1e-5,
-    "General.NumThreads": 28,
-    "Mesh.MeshSizeMin": 0.002,
-    "Mesh.MeshSizeMax": 0.15,
-    "Mesh.MeshSizeFromCurvature": 24,
+    "General.NumThreads": 14,
+    "Mesh.MeshSizeMin": 1,
+    "Mesh.MeshSizeMax": 1000,
+    "Mesh.MeshSizeFromCurvature": 20,
     "Mesh.Algorithm": 6,
     "Mesh.Algorithm3D": 10,
     "Mesh.Smoothing": 5,
     "Mesh.ElementOrder": 1,
+    "Mesh.MshFileVersion": 2.2,
     "General.Terminal": 1
   },
+
+  "geometry_parameters": {
+    "enable_thin_feature_enforcement": false,
+    "rotation_angle_deg": -5.0,
+    "far_field_x0_mm": -50000,
+    "far_field_length_mm": 200000,
+    "far_field_r_envelope_mm": 100000,
+    "far_field_face_tolerance_mm": 0.5,
+    "thin_feature_skip_above_mm": 50000,
+    "planar_face_guard_mm": 2000,
+    "heal_tolerance_mm": null
+  },
   
+  "size_field_parameters": {
+	"min_feature_thickness": 1,
+    "sharp_edge_gap_threshold_mm": 0.05,
+    "size_near": 2,
+    "size_far": 1000,
+    "dist_min": 200,
+    "dist_max": 20000,
+    "cavity_size": 0.5,
+    "cavity_dist_max": 20,
+    "cavity_surface_tags": []
+  },
+
   "boundary_layer_parameters": {
-    "Size": 0.002,
-    "Thickness": 0.0118,
-    "Ratio": 1.16,
-    "NbLayers": 45
+    "Size": 2,
+    "Thickness": 40,
+    "Ratio": 1.15,
+    "NbLayers": 35
   }
 }
