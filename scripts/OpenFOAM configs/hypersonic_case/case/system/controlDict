@@ -72,7 +72,7 @@ functions
         patches         (wall);
         rho             rhoInf;
         rhoInf          1.225;
-        CofR            (25 0 0);
+        CofR            (25.784 -2.256 0.769);
         lRef            49.585;
         Aref            0.1;        // reference area - ADJUST
         
