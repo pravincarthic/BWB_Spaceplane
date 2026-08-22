@@ -1,0 +1,57 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      turbulenceProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// ============================================================================
+// IMPLICIT LES (ILES) ONLY - corrected against the actual repo
+// ============================================================================
+// Checked against hyStrath/src/TurbulenceModels/compressible/
+// turbulentFluidThermoModels/turbulentFluidThermoModels.C: this build DOES
+// register real LES models (WALE, Smagorinsky, kEqn, dynamicKEqn, etc.) -
+// but ILES is not one of those. ILES means no explicit subgrid closure is
+// added at all, which in this solver's factory means simulationType
+// laminar - NOT simulationType LES with some "off" model (there is no
+// "none"/off LESModel registered; setting one would fail at run time).
+//
+// Under "laminar", the only dissipation present is the real molecular
+// transport (Blottner-Eucken, species-dependent - see transportProperties)
+// plus whatever numerical dissipation the KNP flux scheme + limiters
+// (system/fvSchemes) inject. That combination IS implicit LES.
+//
+// NOTE on laminarModel: you asked for "linearViscous" instead of "Stokes".
+// Checked directly - v1706-era hyStrath only registers two laminarModel
+// choices for this solver (same turbulentFluidThermoModels.C file):
+//     makeLaminarModel(Stokes);
+//     makeLaminarModel(Maxwell);
+// "linearViscous" is not a selectable dictionary value here - setting it
+// would fail at run time with an unknown-model error (this isn't a v1706
+// vs. later-version naming difference; this specific file has no third
+// option). Kept as Stokes, which is not a substitute for what you asked -
+// it IS it: Stokes' hypothesis is precisely the linear (Newtonian) viscous
+// stress-strain relation, tau = 2*mu*devSymm(gradU), with zero eddy
+// viscosity added. There's no separate "linearViscous" class to select
+// because Stokes already means exactly that in this model hierarchy.
+// If your local build has patched in an actual "linearViscous" laminar
+// model class, its name is not what this repo's factory registers.
+// ============================================================================
+
+simulationType  laminar;
+
+laminar
+{
+    laminarModel    Stokes;   // = linear viscous stress, zero eddy viscosity
+                               // (see note above); NOT "Maxwell" (that
+                               // variant applies slip-flow/rarefied
+                               // corrections - not applicable here, dense
+                               // continuum, y+<1 wall-resolved)
+    printCoeffs     off;
+}
+
+// ************************************************************************* //

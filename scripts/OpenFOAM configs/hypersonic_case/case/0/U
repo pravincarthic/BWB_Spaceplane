@@ -1,0 +1,51 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | hy2Foam / hyStrath suite
+   \\    /   O peration     | Version:  case-generator
+    \\  /    A nd           | Web:      -
+     \\/     M anipulation  |
+\*----------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volVectorField;
+    object      U;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Freestream: Mach 10 at 130,000 ft (39.6 km), a_inf = 316.97 m/s
+// u_inf = M * a_inf = 10 * 316.97 = 3169.7 m/s
+// NOTE: -5 deg AoA is already built into the mesh geometry (vehicle rotated
+// relative to the domain axis), so the freestream vector below is kept purely
+// axial. Do NOT decompose this into (Ux, Uy, Uz) components for AoA - that
+// would double-apply the angle of attack.
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField   uniform (3169.7 0 0);
+
+boundaryField
+{
+    // PLACEHOLDER PATCH NAMES - verify against actual gmshToFoam output
+    // (run `checkMesh` or inspect constant/polyMesh/boundary after conversion)
+    farfield
+    {
+        type            freestreamVelocity;
+        freestreamValue uniform (3169.7 0 0);
+    }
+
+    wall
+    {
+        type            noSlip;
+    }
+
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform (0 0 0);
+        value           uniform (3169.7 0 0);
+    }
+}
+
+// ************************************************************************* //

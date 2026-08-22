@@ -1,0 +1,41 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      p;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Freestream static pressure at 130,000 ft (user-supplied, not ISA table)
+dimensions      [1 -1 -2 0 0 0 0];
+
+internalField   uniform 292.12;
+
+boundaryField
+{
+    farfield
+    {
+        type            freestreamPressure;
+        freestreamValue uniform 292.12;
+    }
+
+    wall
+    {
+        type            zeroGradient;
+    }
+
+    outlet
+    {
+        type            waveTransmissive;
+        field           p;
+        psi             thermo:psi;
+        gamma           1.4;
+        fieldInf        292.12;
+        lInf            1.0;
+        value           uniform 292.12;
+    }
+}
+
+// ************************************************************************* //

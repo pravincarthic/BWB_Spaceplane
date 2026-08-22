@@ -1,0 +1,57 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      fvSolution;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Solver block corrected to match the real hy2Foam solved-variable set
+// (checked against genericCase/system/fvSolution in the actual repo):
+// the primary conservative variables are rho, rhoU, rhoE, and rhoEv.*
+// (per-mode vibrational energy density). Tt and Tv are NOT solved directly
+// by a linear solver - they are back-computed from those conservative
+// quantities by the thermo package (decoupledEnergyModes). The (h|e).*
+// block below is what that back-computation actually needs solved.
+// No (k|omega|epsilon) block - not applicable, simulationType is laminar
+// (ILES only, see constant/turbulenceProperties).
+
+solvers
+{
+    "(rho|rhoU|rhoE|rhoEv.*)"
+    {
+        solver          diagonal;
+    }
+
+    U
+    {
+        solver          smoothSolver;
+        smoother        GaussSeidel;
+        nSweeps         2;
+        tolerance       1e-09;
+        relTol          1e-02;
+    }
+
+    "(h|e).*"
+    {
+        $U;
+        tolerance       1e-10;
+        relTol          1e-03;
+        minIter         1;
+        maxIter         400;
+    }
+
+    Yi
+    {
+        solver          PBiCG;
+        preconditioner  DILU;
+        tolerance       1e-12;
+        relTol          0;
+        maxIter         10;
+    }
+}
+
+// ************************************************************************* //

@@ -1,0 +1,51 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      thermophysicalProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// This matches the actual hy2Foam (hyStrath/ivanZanardi fork) thermoType
+// convention, confirmed against constant/thermophysicalProperties in the
+// genericCase example shipped with the repo you pointed me at:
+// https://github.com/ivanZanardi/hypersonicfoam
+
+thermoType
+{
+    type            heRho2Thermo;
+    mixture         reacting2Mixture;
+    transport       BlottnerEucken;
+    thermo          decoupledEnergyModes;
+    energy          sensible2InternalEnergy;
+    equationOfState perfect2Gas;
+    specie          advancedSpecie;
+}
+
+hyLight no;
+
+downgradeToSingleTv no;
+downgradeToSingleTemperature no;
+
+chemistryReader foam2ChemistryReader;
+
+// These paths are NOT placeholders - the referenced files are copied
+// verbatim into this case package from the real hyStrath repo
+// (Park 1993, 11-species air: N2, O2, NO, N2+, O2+, NO+, N, O, N+, O+, e-).
+foamChemistryFile "$FOAM_CASE/constant/chemDicts/hTCReactionsEarth93";
+
+foamChemistryThermoFile "$FOAM_CASE/constant/thermoDEM";
+
+twoTemperatureDictFile "$FOAM_CASE/constant/thermo2TModel";
+
+temperatureBounds
+{
+    Tlow    200;
+    Thigh   20000;
+    ThighPatches   2000;
+}
+
+// ************************************************************************* //
