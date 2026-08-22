@@ -35,7 +35,7 @@ checked against the real solver source rather than assumed. See
 
 Full derivation and rationale in `PARAMETERS.md` and `SETTINGS.md`.
 
-## The one placeholder left: the mesh
+## The only placeholder: the mesh
 
 Everything else in this package - chemistry mechanism, species thermo data,
 V-T relaxation model, transport/collision data - is now the real data
