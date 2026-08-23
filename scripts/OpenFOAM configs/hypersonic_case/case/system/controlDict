@@ -27,12 +27,12 @@ purgeWrite      0;
 
 writeFormat     binary;
 writePrecision  10;
-writeCompression off;
+writeCompression on;
 
 timeFormat      general;
 timePrecision   8;
 
-runTimeModifiable true;
+runTimeModifiable false;
 
 // Adaptive timestepping: essential given the mu(T) viscosity jump across the bow shock and the fine wall-resolved (y+<1) prism layer cells.
 adjustTimeStep  yes;
