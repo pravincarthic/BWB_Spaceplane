@@ -42,9 +42,9 @@ Full derivation and rationale in `PARAMETERS.md` and `SETTINGS.md`.
 ## The one placeholder left: the mesh
 
 Everything else in this package - chemistry mechanism, species thermo data,
-V-T relaxation model, transport/collision data - is now the REAL data
-copied verbatim from the hypersonicfoam repo, not a placeholder. The only
-thing you must edit is:
+V-T relaxation model, transport/collision data - is REAL data
+copied verbatim from the hypersonicfoam repo. The only
+placeholder config to edit is:
 
 **`scripts/setup.sh`** - `MESH_FILE` variable near the top. Set this to
 the actual path of your `.msh` file, then run `bash scripts/setup.sh`.
@@ -52,11 +52,10 @@ the actual path of your `.msh` file, then run `bash scripts/setup.sh`.
 After conversion, also check `constant/polyMesh/boundary` and confirm the
 patch names match what `case/0/*` boundary conditions assume (`farfield`,
 `wall`, `outlet`) - the repo's own example case uses different names
-(`inlet`, `cylinder`) for its own geometry, so don't assume ours match
-your mesh either. Rename patches in Gmsh, or edit the `0/` files, as
-needed.
+(`inlet`, `cylinder`) for its own geometry, so not assuming it matches
+my mesh. 
 
-## What ships pre-filled (not placeholders)
+## Pre-filled configs
 
 - `constant/chemDicts/hTCReactionsEarth93` - real Park (1993) 11-species
   air reaction mechanism, copied from the repo's `genericCase` example
@@ -69,15 +68,11 @@ needed.
   is dense continuum flow, not the near-continuum-breakdown regime those
   diagnostics target)
 - `constant/thermophysicalProperties` references all of the above via
-  `$FOAM_CASE`-relative paths, so it works immediately once you've placed
-  this case anywhere and run `setup.sh`
+  `$FOAM_CASE`-relative paths for portability
 
 ## Running
 
 ```bash
-tar xzf hypersonic_case_*.tar.gz
-cd hypersonic_case
-# Edit scripts/setup.sh: MESH_FILE only
 bash scripts/setup.sh
 bash scripts/run.sh 8       # 8 MPI ranks, adjust as needed
 bash scripts/postProcess.sh
@@ -100,12 +95,12 @@ logs/               run logs written here by run.sh
 ## Important caveats
 
 - Boundary patch names (`farfield`, `wall`, `outlet`) are placeholders -
-  confirm against your actual converted mesh.
-- `endTime` in `controlDict` is a placeholder judgment call (0.02 s) - set
-  it based on your vehicle's reference length and desired flow-through
-  time once known.
-- Mesh classification (hybrid, y+<1) and complexity level (complex,
-  leaning down from "complex/extreme") were set based on your description
+  rename actual actual mesh. In my case the elements are `Inlet`, `Outlet`, `Atmosphere`, `Walls`
+- `endTime` in `controlDict` is a judgment call (e.g. 0.02 s) - I set
+  it as 0.03 sec based on my vehicle's reference length and desired flow-through
+  time.
+- Mesh classification (hybrid, y+ < 1) and complexity level (complex,
+  leaning down from "complex/extreme") were set based judgement
   of a "smooth spaceplane" body - see `SETTINGS.md` for the reasoning.
 - This case targets OpenFOAM v1706, which is what hyStrath (and therefore
   hy2Foam) is built against per the repo's own README - `fvConstraints`
