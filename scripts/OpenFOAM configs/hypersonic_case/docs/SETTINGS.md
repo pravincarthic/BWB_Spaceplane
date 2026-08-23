@@ -4,14 +4,11 @@ This config was checked against the actual hy2Foam source
 (https://github.com/ivanZanardi/hypersonicfoam, cloned and inspected) 
 after an earlier draft of this package used assumed
 dictionary structures values. This file documents both the physical/numerical
-choices you asked for and the corrections made once the real repo was
-available - both matter for understanding why the files look the way
-they do.
+choices.
 
 ## Corrections made after checking the real repo
 
-Earlier I guessed several hy2Foam conventions
-before the repo was referred. Once cloned, I found my configs to be wrong
+Before checking, multiple parameters were assumed. Once cloned, original configs found to be wrong
 and have been fixed:
 
 1. **Chemistry/thermo data placeholder replaced with real values**
