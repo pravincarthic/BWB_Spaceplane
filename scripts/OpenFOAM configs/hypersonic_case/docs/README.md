@@ -7,39 +7,35 @@ OpenFOAM case for a hypersonic vehicle at Mach 10, 130,000 ft altitude,
 -5 deg angle of attack, using:
 
 - Implicit LES (ILES) only - no explicit subgrid closure
-- KNP (Kurganov-Noelle-Petrova) flux scheme, Minmod limiter on U,
-  vanLeer limiter on everything else
-- Isothermal wall at 1500 K
+- KNP (Kurganov-Noelle-Petrova) flux scheme, minMod limiter on U,
+  vanLeer limiter on the remaining files
+- Isothermal wall at 1500 K (good starting guess)
 - 11-species real gas thermochemistry (Park 1993 mechanism), with
   translational/vibrational temperature non-equilibrium (Tt, Tv)
-- Mesh: hybrid (prism boundary layer + tet core), y+ < 1
+- Mesh: hybrid (prism boundary layer + tet core), y<sup>+</sup> < 1
 
-The actual hypersonicfoam repo was cloned and inspected to build this case,
+The actual HypersonicFoam repo was cloned and inspected to build this case,
 so the file structures, dictionary keys, and chemistry/thermo data below are
 checked against the real solver source rather than assumed. See
 `SETTINGS.md` for a full list of corrections made after that check.
-
-The mesh itself was not uploaded (upload size limits), so this package
-ships without `constant/polyMesh/`. You must convert your own mesh before
-running - see "The one placeholder left" below.
 
 ## Freestream conditions used
 
 | Quantity | Value |
 |---|---|
 | Altitude | 130,000 ft (39.6 km) |
-| Pressure P_inf | 292.12 Pa |
-| Density rho_inf | 0.004071 kg/m^3 |
-| Temperature T_inf (= Tt = Tv) | 249 K |
-| Speed of sound a_inf | 316.97 m/s |
+| Pressure P<sub>inf</sub> | 292.12 Pa |
+| Density rho<sub>inf</sub> | 0.004071 kg/m<sup>3</sup> |
+| Temperature T<sub>inf</sub> (= Tt = Tv) | 249 K |
+| Speed of sound a<sub>inf</sub> | 316.97 m/s |
 | Mach number | 10 |
-| Velocity u_inf | 3169.7 m/s |
+| Velocity u<sub>inf</sub> | 3169.7 m/s |
 | Wall temperature | 1500 K (isothermal) |
 | AoA | -5 deg (built into mesh geometry, not the velocity vector) |
 
 Full derivation and rationale in `PARAMETERS.md` and `SETTINGS.md`.
 
-## The one placeholder left: the mesh
+## The only placeholder: the mesh
 
 Everything else in this package - chemistry mechanism, species thermo data,
 V-T relaxation model, transport/collision data - is REAL data
@@ -58,7 +54,7 @@ my mesh.
 ## Pre-filled configs
 
 - `constant/chemDicts/hTCReactionsEarth93` - real Park (1993) 11-species
-  air reaction mechanism, copied from the repo's `genericCase` example
+  air reaction mechanism, copied from the repo's (HypersonicFoam) `genericCase` example
 - `constant/thermoDEM` - real per-species thermodynamic data
 - `constant/thermo2TModel` - real Millikan-White/Park V-T relaxation model
 - `constant/hTCProperties`, `constant/chemistryProperties` - real config,
@@ -74,7 +70,7 @@ my mesh.
 
 ```bash
 bash scripts/setup.sh
-bash scripts/run.sh 8       # 8 MPI ranks, adjust as needed
+bash scripts/run.sh 8       # 8 MPI ranks, change to number of cores desired. If using a manager such as SLURM, ensure enough cores are requested first
 bash scripts/postProcess.sh
 ```
 

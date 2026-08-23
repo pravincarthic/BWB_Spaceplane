@@ -49,8 +49,7 @@ divSchemes
 
     div(tauMC)          Gauss linear;
 
-    // Momentum: Minmod-limited (vector form) - more diffusive than vanLeer,
-    // as requested, isolated to U only
+    // Momentum: Minmod-limited (vector form) - more diffusive than vanLeer, isolated to U only
     div(phi,U)          Gauss MinmodV;
 
     // Species diffusion / convection (11-species) - vanLeer, unchanged
@@ -70,7 +69,7 @@ interpolationSchemes
 {
     default          linear;
     reconstruct(rho) vanLeer;
-    reconstruct(U)   MinmodV;     // U only - minmod, per your request
+    reconstruct(U)   MinmodV;     // U only - minmod
     reconstruct(T)   vanLeer;
 }
 
