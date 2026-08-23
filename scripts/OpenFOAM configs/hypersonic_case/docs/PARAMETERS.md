@@ -3,8 +3,7 @@
 ## Freestream state (as supplied, not from ISA table lookup)
 
 130,000 ft = 39,624 m (39.6 km). This falls between the 30 km and 40 km rows
-of the standard 1976 US Standard Atmosphere table, so rather than
-interpolate, your directly supplied values were used as-given:
+of the standard 1976 US Standard Atmosphere table, so used as-given:
 
 ```
 P_inf   = 292.12 Pa
@@ -23,7 +22,7 @@ R = P_inf / (rho_inf * T_inf)
 ```
 
 Standard air R = 287.05 J/(kg.K). The 0.4% difference is well within
-normal real-atmosphere variation and is not a red flag - your inputs are
+normal real-atmosphere variation and is not a concern - the inputs are
 self-consistent.
 
 ### Speed of sound cross-check
@@ -32,7 +31,7 @@ self-consistent.
 a = sqrt(gamma * R * T) = sqrt(1.4 * 287.05 * 249) = 316.33 m/s
 ```
 
-vs. your supplied 316.97 m/s - a 0.2% difference, consistent with the same
+vs. assumed 316.97 m/s - a 0.2% difference, consistent with the same
 minor R variation above. The supplied value (316.97 m/s) was used directly
 in all downstream calculations rather than the recomputed one.
 
@@ -41,6 +40,7 @@ in all downstream calculations rather than the recomputed one.
 ```
 u_inf = M * a_inf = 10 * 316.97 = 3169.7 m/s
 ```
+That's mach 10
 
 ### Dynamic viscosity (Sutherland's law)
 
@@ -66,14 +66,12 @@ nu_inf = mu_inf / rho_inf = 1.529e-5 / 0.004071 = 3.756e-3 m^2/s
 
 ### Reynolds number
 
-Not computed - no reference length was supplied. Once you have a body
-reference length L, compute:
+Not computed now because no reference length was supplied. Once I plug it in
+reference length L, I computed:
 
 ```
 Re_L = (rho_inf * u_inf * L) / mu_inf
 ```
-
-and add it to your case documentation for reproducibility.
 
 ## Post-shock estimate (documentation only, not used in initial conditions)
 
