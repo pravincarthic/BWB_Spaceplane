@@ -23,7 +23,7 @@ deltaT          1e-7;         // initial guess, overridden by adjustTimeStep
 writeControl    adjustableRunTime;
 writeInterval   1e-4;
 
-purgeWrite      0;
+purgeWrite      5;
 
 writeFormat     binary;
 writePrecision  10;
@@ -53,7 +53,7 @@ functions
         
         patches         (wall);
         rho             rhoInf;
-        rhoInf          1.225;      // freestream density at 130,000 ft
+        rhoInf          0.00407069;      // freestream density at 130,000 ft
         CofR            (25.784 -2.256 0.769);   // center of rotation - adjust to vehicle CoM
         lRef            49.585;     // Reference length (vehicle nose-to-tail) in m
         Aref            0.1;        // Change to real value in m^2 as seen in a CAD viewer from the top view
@@ -68,7 +68,7 @@ functions
         
         patches         (wall);
         rho             rhoInf;
-        rhoInf          1.225;
+        rhoInf          0.00407069;
         CofR            (25.784 -2.256 0.769);
         lRef            49.585;
         Aref            0.1;        // reference area - ADJUST
@@ -85,5 +85,29 @@ functions
         writeControl    adjustableRunTime;
         writeInterval   1e-4;
         fields          (p Tt Tv);
+    }
+	
+	shockWave3D
+    {
+        type            surfaces;
+        libs            (sampling); 
+        
+        writeControl    timeStep;
+        writeInterval   300;
+        surfaceFormat   vtk;
+        fields          ( U T p );
+
+        interpolationScheme cellPoint;
+
+        surfaces
+        {
+            bowShockIso
+            {
+                type        isoSurface;
+                isoField    p;       
+                isoValue    1000;   // Adjust to your freestream shock pressure jump
+                interpolate true;
+            }
+        }
     }
 }

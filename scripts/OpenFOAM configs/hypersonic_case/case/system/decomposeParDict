@@ -1,0 +1,34 @@
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    note        "Optimized for 31M mesh | Mach 10 Hypersonic | 384 Cores";
+    object      decomposeParDict;
+}
+
+// 1. Total Core Count (Aligned to your 384-core target)
+numberOfSubdomains 384;
+
+// 2. Parallel Method
+// ptscotch is perfect for massive unstructured tetrahedral meshes
+method          ptscotch; 
+
+// 3. ptscotch Coefficients
+ptscotchCoeffs
+{
+    // High communication weight ensures minimal processor boundary faces
+    // critical for hypersonic shock wave stability across domains
+}
+
+// 4. Cleaned Constraints for Hypersonic Flow Stability
+constraints
+{
+    // Keeps localized atmosphere patch boundaries on uniform subdomains
+    // to prevent numerical shock reflections and pressure checkerboarding
+    preservePatches
+    {
+        type    preservePatches;
+        patches ( "(.*)atmosphere(.*)" ); 
+    }
+}
