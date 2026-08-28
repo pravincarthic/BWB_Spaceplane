@@ -22,7 +22,7 @@ source $SCRATCH/$USER/OpenFOAM/OpenFOAM-v1706/etc/bashrc
 cd $SCRATCH/$USER/plain_BWB
 
 echo "Checking Mesh Quality..."
-srun -n 384 checkMesh -parallel 2>&1 | tee ../../log.checkmesh.log
+srun -n 384 checkMesh -parallel 2>&1 | | tee ../../log.checkmesh.log
 
 #------------
 #module load spack
