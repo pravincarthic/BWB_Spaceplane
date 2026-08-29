@@ -56,7 +56,7 @@ functions
         rhoInf          0.00407069;      // freestream density at 130,000 ft
         CofR            (25.784 -2.256 0.769);   // center of rotation - adjust to vehicle CoM
         lRef            49.585;     // Reference length (vehicle nose-to-tail) in m
-        Aref            0.1;        // Change to real value in m^2 as seen in a CAD viewer from the top view
+        Aref            830.025;        // Change to real value in m^2 as seen in a CAD viewer from the top view
     }
     
     forceCoeffs
@@ -71,7 +71,7 @@ functions
         rhoInf          0.00407069;
         CofR            (25.784 -2.256 0.769);
         lRef            49.585;
-        Aref            0.1;        // reference area - ADJUST
+        Aref            830.025;        // reference area - ADJUST
         
         magUInf         3169.7;     // freestream velocity magnitude
         liftDir         (0 0 1);    // lift direction (Z, normal to flow)
