@@ -21,19 +21,26 @@ internalField   uniform 0.767;
 
 boundaryField
 {
-    farfield
+    Inlet
     {
         type            inletOutlet;
         inletValue      uniform 0.767;
         value           uniform 0.767;
     }
 
-    wall
+    Atmosphere
+    {
+        type            inletOutlet;
+        inletValue      uniform 0.767;
+        value           uniform 0.767;
+    }
+
+    Solid_Walls
     {
         type            zeroGradient;
     }
 
-    outlet
+    Outlet
     {
         type            inletOutlet;
         inletValue      uniform 0.767;
