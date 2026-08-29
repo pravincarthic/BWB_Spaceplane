@@ -76,6 +76,7 @@ functions
         magUInf         3169.7;     // freestream velocity magnitude
         liftDir         (0 0 1);    // lift direction (Z, normal to flow)
         dragDir         (1 0 0);    // drag direction (X, flow-aligned)
+		pitchAxis       (0 1 0);    // Nose pitch by -5 deg
     }
     
     fieldMinMax
@@ -90,7 +91,7 @@ functions
 	shockWave3D
     {
         type            surfaces;
-        libs            (sampling); 
+        libs            ("libsampling.so"); 
         
         writeControl    timeStep;
         writeInterval   300;

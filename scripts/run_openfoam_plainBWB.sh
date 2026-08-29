@@ -19,10 +19,10 @@ ulimit -s unlimited
 ulimit -c unlimited
 
 source $SCRATCH/$USER/OpenFOAM/OpenFOAM-v1706/etc/bashrc
-cd $SCRATCH/$USER/plain_BWB
+cd $SCRATCH/$USER/plain_BWB/hypersonic_case/case
 
 echo "Checking Mesh Quality..."
-srun -n 384 checkMesh -parallel 2>&1 | tee ../../log.checkmesh.log
+srun -n 384 checkMesh -allTopology -allGeometry -parallel 2>&1 | tee ../../log.checkmesh.log
 
 #------------
 #module load spack
@@ -40,7 +40,7 @@ srun -n 384 checkMesh -parallel 2>&1 | tee ../../log.checkmesh.log
 
 # Execution Workflow with Proper Logging and Pipe Redirection
 # Launch OpenFOAM solver with srun on 480 MPI ranks
-SOLVER="hy2foam"  # Replace with your specific solver (e.g., scalarTransportFoam, hyStrath, etc.)
+SOLVER="hy2Foam"  # Replace with your specific solver (e.g., scalarTransportFoam, hyStrath, etc.)
 
 echo "Executing $SOLVER on $SLURM_NTASKS ranks..."
 srun -n 384 --cpu-bind=cores $SOLVER -parallel 2>&1 | tee ../../log.$SOLVER.log

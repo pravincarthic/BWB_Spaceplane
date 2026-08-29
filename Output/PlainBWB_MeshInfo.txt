@@ -2,13 +2,13 @@
 Base information
 ----------------
 
-Name: Gmsh_without_cavities_AoA_neg5_20260821
+Name: Gmsh_without_cavities_AoA_neg5_20260828
 Object: Mesh
 
-Nodes: 4994282
+Nodes: 4996889
 
-Elements: 31013640
-    Linear: 31013640
+Elements: 31029522
+    Linear: 31029522
     Quadratic: 0
     Bi-Quadratic: 0
 
@@ -20,13 +20,13 @@ Elements: 31013640
         Linear: 0
         Quadratic: 0
 
-    2D (faces): 560580
-        Linear: 560580
+    2D (faces): 560590
+        Linear: 560590
         Quadratic: 0
         Bi-Quadratic: 0
 
-        Triangles: 560580
-            Linear: 560580
+        Triangles: 560590
+            Linear: 560590
             Quadratic: 0
             Bi-Quadratic: 0
         Quadrangles: 0
@@ -37,13 +37,13 @@ Elements: 31013640
             Linear: 0
             Quadratic: 0
 
-    3D (volumes): 30453060
-        Linear: 30453060
+    3D (volumes): 30468932
+        Linear: 30468932
         Quadratic: 0
         Bi-Quadratic: 0
 
-        Tetrahedrons: 30453060
-            Linear: 30453060
+        Tetrahedrons: 30468932
+            Linear: 30468932
             Quadratic: 0
         Hexahedrons: 0
             Linear: 0
@@ -67,27 +67,27 @@ Element information
 Additional information
 ----------------------
 
-Name: Gmsh_without_cavities_AoA_neg5_20260821
+Name: Gmsh_without_cavities_AoA_neg5_20260828
     Type: Imported
-    File name: C:\Users\pravi\AppData\Roaming\161990\Gmsh_without_cavities_AoA_neg5_20260821.med
-    Size: 1683965782
+    File name: C:\Users\pravi\AppData\Roaming\372630\Gmsh_without_cavities_AoA_neg5_20260828.med
+    Size: 1684832318
     Version: 6.0.1
     Groups
         Volumes
             Group_Of_All_Volumes
                 Type: Standalone group
-                Size: 30453060
+                Size: 30468932
                 Color: #ffaa00
                 Underlying nodes
         Faces
             Outlet
                 Type: Standalone group
-                Size: 92544
+                Size: 92574
                 Color: #ffaa00
-                Underlying nodes: 46673
+                Underlying nodes: 46688
             Atmosphere
                 Type: Standalone group
-                Size: 370244
+                Size: 370222
                 Color: #ffaa00
                 Underlying nodes
             Inlet
@@ -97,15 +97,15 @@ Name: Gmsh_without_cavities_AoA_neg5_20260821
                 Underlying nodes: 46688
             Solid_Walls
                 Type: Standalone group
-                Size: 5218
+                Size: 5220
                 Color: #ffaa00
-                Underlying nodes: 2611
+                Underlying nodes: 2612
 
 -------------------
 Quality information
 -------------------
 
-Name:  Gmsh_without_cavities_AoA_neg5_20260821
+Name:  Gmsh_without_cavities_AoA_neg5_20260828
 Nodes Information:
     Number of the free nodes: 
     Number of the double nodes: 

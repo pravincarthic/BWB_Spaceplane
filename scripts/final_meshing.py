@@ -714,9 +714,9 @@ def create_mesh(config_file='gmsh_config.json'):
     # 4. ROTATE SPACEPLANE
     # ========================================================================
     rotation_angle_deg = geom_params.get("rotation_angle_deg", -5.0)
-    print(f"Step 4: Rotating spaceplane ({rotation_angle_deg} deg around Z-axis)...")
+    print(f"Step 4: Rotating spaceplane ({rotation_angle_deg} deg around Y-axis)...")
     angle_rad = rotation_angle_deg * math.pi / 180.0
-    gmsh.model.occ.rotate([(3, spaceplane_tag)], 0, 0, 0, 0, 0, 1, angle_rad)
+    gmsh.model.occ.rotate([(3, spaceplane_tag)], 0, 0, 0, 0, 1, 0, angle_rad)
     gmsh.model.occ.synchronize()
 
     exportStepFile(export_geometry_path + ".1.step",'')
