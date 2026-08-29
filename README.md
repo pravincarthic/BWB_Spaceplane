@@ -1,4 +1,4 @@
-# Aero-Structural and Aerothermal Integration of a Hybrid Blended Wing Body (BWB) and Flying Wing Hypersonic Spaceplane with Passive Acoustic Metasurface Micro-Cavity Arrays
+# Numerical Investigation of Discrete Symmetry based Passive Micro-cavity Patterns for Boundary-Layer Control in a Hypersonic Blended Wing Body Spaceplane
 
 ## Abstract
 
