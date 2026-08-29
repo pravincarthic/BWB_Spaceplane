@@ -23,7 +23,7 @@ deltaT          1e-7;         // initial guess, overridden by adjustTimeStep
 writeControl    adjustableRunTime;
 writeInterval   1e-4;
 
-purgeWrite      5;
+purgeWrite      0;   // Needed for Paraview Visualisations
 
 writeFormat     binary;
 writePrecision  10;
@@ -50,13 +50,18 @@ functions
         libs            ("libforces.so");
         writeControl    adjustableRunTime;
         writeInterval   1e-4;
-        
-        patches         (wall);
+
+        // FIXED: "wall" does not exist in this mesh. final_meshing.py tags
+        // the vehicle surface as physical group "Solid_Walls" (case-sensitive).
+        patches         (Solid_Walls);
         rho             rhoInf;
         rhoInf          0.00407069;      // freestream density at 130,000 ft
-        CofR            (25.784 -2.256 0.769);   // center of rotation - adjust to vehicle CoM
-        lRef            49.585;     // Reference length (vehicle nose-to-tail) in m
-        Aref            0.1;        // Change to real value in m^2 as seen in a CAD viewer from the top view
+        CofR            (25.717 0.000 3.022);   // center of rotation - adjust to vehicle CoM
+        // FIXED: was 3% off the actual meshed body length. Measured directly
+        // from the STEP file's vehicle-solid bounding box (X-extent, as-meshed,
+        // rotated frame): 48060.7 mm = 48.061 m.
+        lRef            48.061;
+        Aref            912.1;        // Change to real value in m^2 as seen in a CAD viewer from the top view
     }
     
     forceCoeffs
@@ -65,20 +70,21 @@ functions
         libs            ("libforces.so");
         writeControl    adjustableRunTime;
         writeInterval   1e-4;
-        
-        patches         (wall);
+
+        // FIXED: see forces block above.
+        patches         (Solid_Walls);
         rho             rhoInf;
         rhoInf          0.00407069;
-        CofR            (25.784 -2.256 0.769);
-        lRef            49.585;
-        Aref            0.1;        // reference area - ADJUST
-        
+        CofR            (25.717 0.000 3.022);
+        lRef            48.061;
+        Aref            912.1;
+
         magUInf         3169.7;     // freestream velocity magnitude
         liftDir         (0 0 1);    // lift direction (Z, normal to flow)
         dragDir         (1 0 0);    // drag direction (X, flow-aligned)
-		pitchAxis       (0 1 0);    // Nose pitch by -5 deg
+        pitchAxis       (0 1 0);    // Nose pitch by -5 deg
     }
-    
+
     fieldMinMax
     {
         type            fieldMinMax;
@@ -87,14 +93,20 @@ functions
         writeInterval   1e-4;
         fields          (p Tt Tv);
     }
-	
-	shockWave3D
+
+    shockWave3D
     {
         type            surfaces;
-        libs            ("libsampling.so"); 
-        
-        writeControl    timeStep;
-        writeInterval   300;
+        libs            ("libsampling.so");
+
+        // FIXED: was writeControl timeStep + writeInterval 300, which under
+        // adjustTimeStep=yes gives an unpredictable physical-time cadence and
+        // (at these deltaT bounds) lands near ~500 frames over the run, not
+        // the requested 1000. adjustableRunTime + endTime/1000 guarantees
+        // ~1000 evenly time-spaced frames regardless of how the adaptive
+        // timestep behaves.
+        writeControl    adjustableRunTime;
+        writeInterval   3e-5;        // = endTime / 1000 = 0.03 / 1000
         surfaceFormat   vtk;
         fields          ( U T p );
 
@@ -105,8 +117,16 @@ functions
             bowShockIso
             {
                 type        isoSurface;
-                isoField    p;       
-                isoValue    1000;   // Adjust to your freestream shock pressure jump
+                isoField    p;
+                // FIXED: freestream p = 292.12 Pa; theoretical normal-shock
+                // jump at Mach 10 gives p2 ~ 34,032 Pa (p2/p1 ~ 116.5). The
+                // previous isoValue of 1000 Pa (~3.4x freestream) sits right
+                // at the very start of the compression and can pick up weak
+                // off-body waves instead of the bow shock itself. 10,000 Pa
+                // (~34 x freestream, ~30% of the post-shock value) sits
+                // comfortably inside the shock layer. Adjust once you see the
+                // actual pressure field - this is still an estimate.
+                isoValue    10000;
                 interpolate true;
             }
         }

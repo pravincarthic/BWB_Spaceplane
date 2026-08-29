@@ -19,9 +19,11 @@ FoamFile
 // upwind scheme (confirmed directly in KNP-KT.H: "a_pos = ap/(ap - am);
 // //- Eq.9 KNP"). So fluxScheme Kurganov below is what you asked for.
 //
-// U (momentum) uses Minmod/MinmodV - the most diffusive standard TVD
-// limiter, tighter than vanLeer. Every other reconstructed/limited field
-// (rho, T, species) stays vanLeer, as requested.
+// U (momentum) - Minmod/MinmodV - the most diffusive standard TVD
+// limiter, tighter than vanLeer; Minmod-limited (vector form) - 
+// more diffusive than vanLeer, isolated to U only. 
+// Every other reconstructed/limited field (rho, T, species)
+// stays vanLeer.
 //
 // No explicit SGS term is added anywhere in this file (see
 // constant/turbulenceProperties: simulationType laminar, laminarModel

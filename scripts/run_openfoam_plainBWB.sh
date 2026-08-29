@@ -39,7 +39,7 @@ srun -n 384 checkMesh -allTopology -allGeometry -parallel 2>&1 | tee ../../log.c
 # If loaded via module: spack load openfoam
 
 # Execution Workflow with Proper Logging and Pipe Redirection
-# Launch OpenFOAM solver with srun on 480 MPI ranks
+# Launch OpenFOAM solver with srun on 384 MPI ranks
 SOLVER="hy2Foam"  # Replace with your specific solver (e.g., scalarTransportFoam, hyStrath, etc.)
 
 echo "Executing $SOLVER on $SLURM_NTASKS ranks..."

@@ -12,13 +12,12 @@ numberOfSubdomains 384;
 
 // 2. Parallel Method
 // ptscotch is perfect for massive unstructured tetrahedral meshes
-method          ptscotch; 
+method          ptscotch;
 
 // 3. ptscotch Coefficients
 ptscotchCoeffs
 {
-    // High communication weight ensures minimal processor boundary faces
-    // critical for hypersonic shock wave stability across domains
+    // No config needed here. Default suffices
 }
 
 // 4. Cleaned Constraints for Hypersonic Flow Stability
@@ -29,6 +28,6 @@ constraints
     preservePatches
     {
         type    preservePatches;
-        patches ( "(.*)atmosphere(.*)" ); 
+        patches ( "Atmosphere" );
     }
 }

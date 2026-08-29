@@ -8,25 +8,31 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// Freestream static pressure at 130,000 ft (user-supplied, not ISA table)
+// Freestream static pressure at 130,000 ft (user-supplied, same as ISA table)
 dimensions      [1 -1 -2 0 0 0 0];
 
 internalField   uniform 292.12;
 
 boundaryField
 {
-    farfield
+    Inlet
     {
         type            freestreamPressure;
         freestreamValue uniform 292.12;
     }
 
-    wall
+    Atmosphere
+    {
+        type            freestreamPressure;
+        freestreamValue uniform 292.12;
+    }
+
+    Solid_Walls
     {
         type            zeroGradient;
     }
 
-    outlet
+    Outlet
     {
         type            waveTransmissive;
         field           p;

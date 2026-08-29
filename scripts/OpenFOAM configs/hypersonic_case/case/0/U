@@ -27,20 +27,24 @@ internalField   uniform (3169.7 0 0);
 
 boundaryField
 {
-    // PLACEHOLDER PATCH NAMES - verify against actual gmshToFoam output
-    // (run `checkMesh` or inspect constant/polyMesh/boundary after conversion)
-    farfield
+    Inlet
     {
         type            freestreamVelocity;
         freestreamValue uniform (3169.7 0 0);
     }
 
-    wall
+    Atmosphere
+    {
+        type            freestreamVelocity;
+        freestreamValue uniform (3169.7 0 0);
+    }
+
+    Solid_Walls
     {
         type            noSlip;
     }
 
-    outlet
+    Outlet
     {
         type            inletOutlet;
         inletValue      uniform (0 0 0);

@@ -20,14 +20,21 @@ internalField   uniform 250.0;
 
 boundaryField
 {
-    farfield
+    Inlet
     {
         type            inletOutlet;
         inletValue      uniform 250.0;
         value           uniform 250.0;
     }
 
-    wall
+    Atmosphere
+    {
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+
+    Solid_Walls
     {
         // Isothermal wall, 1500 K, matching Tt (full vibrational
         // accommodation at the wall assumed - a common simplifying choice
@@ -36,7 +43,7 @@ boundaryField
         value           uniform 1500.0;
     }
 
-    outlet
+    Outlet
     {
         type            inletOutlet;
         inletValue      uniform 250.0;
