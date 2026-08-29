@@ -1,0 +1,56 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      Tv_N2;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Per-species vibrational temperature, required because thermophysicalProperties
+// sets downgradeToSingleTv no. Verified directly against hyStrath source
+// (basic2MultiComponentMixture.C): with downgradeToSingleTv=no, the solver
+// constructs "Tv_" + speciesName with IOobject::MUST_READ for every species -
+// this file (and its 10 siblings) is not optional.
+//
+// N2 is a diatomic molecule -> real vibrational mode -> same freestream/wall
+// values as the case's existing bulk Tv field (250 K freestream, thermal
+// equilibrium with Tt; 1500 K at the wall, full accommodation assumed).
+
+dimensions      [0 0 0 1 0 0 0];
+
+internalField   uniform 250.0;
+
+boundaryField
+{
+    Inlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+
+    Atmosphere
+    {
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+
+    Solid_Walls
+    {
+        type            fixedValue;
+        value           uniform 1500.0;
+    }
+
+    Outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+}
+
+// ************************************************************************* //

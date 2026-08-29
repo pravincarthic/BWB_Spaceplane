@@ -29,13 +29,13 @@ boundaryField
 {
     Inlet
     {
-        type            freestreamVelocity;
+        type            freestream;
         freestreamValue uniform (3169.7 0 0);
     }
 
     Atmosphere
     {
-        type            freestreamVelocity;
+        type            freestream;
         freestreamValue uniform (3169.7 0 0);
     }
 

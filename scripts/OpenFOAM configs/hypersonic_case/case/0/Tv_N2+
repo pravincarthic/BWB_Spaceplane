@@ -1,0 +1,53 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      Tv_N2+;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Per-species vibrational temperature, required because downgradeToSingleTv
+// is no (see Tv_N2 for the full source-verified explanation).
+// N2+ is a molecular ion -> retains a vibrational mode -> same
+// freestream/wall values as the case's existing bulk Tv. Freestream mass
+// fraction is 0 (see 0/N2+), so this field's value only becomes dynamically
+// relevant once the chemistry starts producing N2+ behind the bow shock.
+
+dimensions      [0 0 0 1 0 0 0];
+
+internalField   uniform 250.0;
+
+boundaryField
+{
+    Inlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+
+    Atmosphere
+    {
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+
+    Solid_Walls
+    {
+        type            fixedValue;
+        value           uniform 1500.0;
+    }
+
+    Outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+}
+
+// ************************************************************************* //
