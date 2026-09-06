@@ -10,26 +10,13 @@ FoamFile
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 // ============================================================================
-// KNP flux scheme + minmod (U) / vanLeer (rest) limiters, ILES only
+// KNP flux scheme + vanLeer limiters, ILES only
 // ============================================================================
-// Checked against hyStrath/applications/solvers/compressible/hy2Foam/
-// numerics/fluxesCalculation.H and numerics/KNP-KT.H: the valid fluxScheme
-// string values are Kurganov, Tadmor, ROE, KFVS, LxF - there is no literal
-// "KNP" string. "Kurganov" IS the Kurganov-Noelle-Petrova (KNP) central-
-// upwind scheme (confirmed directly in KNP-KT.H: "a_pos = ap/(ap - am);
-// //- Eq.9 KNP"). So fluxScheme Kurganov below is what you asked for.
-//
-// U (momentum) - Minmod/MinmodV - the most diffusive standard TVD
-// limiter, tighter than vanLeer; Minmod-limited (vector form) - 
-// more diffusive than vanLeer, isolated to U only. 
-// Every other reconstructed/limited field (rho, T, species)
-// stays vanLeer.
-//
-// No explicit SGS term is added anywhere in this file (see
-// constant/turbulenceProperties: simulationType laminar, laminarModel
-// Stokes) - the limiters below are deliberately the ONLY numerical
-// dissipation mechanism besides real molecular transport. That is what
-// makes this a pure ILES run.
+// Checked against hyStrath/applications/solvers/compressible/hy2Foam/numerics/fluxesCalculation.H and numerics/KNP-KT.H: the valid fluxScheme string values are Kurganov, Tadmor, ROE, KFVS, LxF - there is no literal
+// "KNP" string. "Kurganov" IS the Kurganov-Noelle-Petrova (KNP) central- upwind scheme (confirmed directly in KNP-KT.H: "a_pos = ap/(ap - am); //- Eq.9 KNP").
+// Every reconstructed/limited field (U, rho, T, species) uses vanLeer.
+// No explicit SGS term is added anywhere in this file (see constant/turbulenceProperties: simulationType laminar, laminarModel Stokes) - the limiters below are deliberately the ONLY numerical
+// dissipation mechanism besides real molecular transport. That is what makes this a pure ILES run.
 // ============================================================================
 
 fluxScheme            Kurganov;      // = KNP central-upwind scheme
@@ -51,7 +38,6 @@ divSchemes
 
     div(tauMC)          Gauss linear;
 
-    // Momentum: Minmod-limited (vector form) - more diffusive than vanLeer, isolated to U only
     div(phi,U)          Gauss vanLeerV;
 
     // Species diffusion / convection (11-species) - vanLeer, unchanged
