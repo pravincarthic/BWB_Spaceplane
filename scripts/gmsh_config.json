@@ -1,12 +1,12 @@
 {
-  "step_file": "D:\\BWB Spaceplane\\Design\\BWB_Spaceplane_V2_20260822.stp",
-  "output_file": "D:\\BWB Spaceplane\\Meshing Scripts\\v2_cleaned\\Gmsh_without_cavities_AoA_neg5_20260828.msh",
-  "export_geometry_path": "D:\\BWB Spaceplane\\Meshing Scripts\\v2_cleaned\\Geometry_precut_AoA_neg5_20260828.step",
+  "step_file": "D:\\BWB_git\\BWB_Spaceplane\\Design\\BWB_Spaceplane_V2_Cavity_20260906.step",
+  "output_file": "D:\\BWB_git\\BWB_Spaceplane\\Output\\Gmsh_with_cavities_AoA_neg5_20260906.msh",
+  "export_geometry_path": "D:\\BWB_git\\BWB_Spaceplane\\Output\\Geometry_precut_AoA_neg5_20260906.step",
 
   "gmsh_parameters": {
     "Mesh.RandomFactor": 1e-5,
     "General.NumThreads": 16,
-    "Mesh.MeshSizeMin": 0.5,
+    "Mesh.MeshSizeMin": 1,
     "Mesh.MeshSizeMax": 1000,
     "Mesh.MeshSizeFromCurvature": 20,
     "Mesh.Algorithm": 6,
