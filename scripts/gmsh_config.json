@@ -6,7 +6,7 @@
   "gmsh_parameters": {
     "Mesh.RandomFactor": 1e-5,
     "General.NumThreads": 16,
-    "Mesh.MeshSizeMin": 1,
+    "Mesh.MeshSizeMin": 0.5,
     "Mesh.MeshSizeMax": 1000,
     "Mesh.MeshSizeFromCurvature": 20,
     "Mesh.Algorithm": 6,
@@ -32,19 +32,19 @@
   "size_field_parameters": {
 	"min_feature_thickness": 1,
     "sharp_edge_gap_threshold_mm": 0.05,
-    "size_near": 2,
+    "size_near": 0.5,
     "size_far": 1000,
-    "dist_min": 200,
-    "dist_max": 20000,
-    "cavity_size": 0.5,
-    "cavity_dist_max": 20,
+    "dist_min": 300,
+    "dist_max": 25000,
+    "cavity_size": 1.0,
+    "cavity_dist_max": 50,
     "cavity_surface_tags": []
   },
 
   "boundary_layer_parameters": {
-    "Size": 2,
-    "Thickness": 40,
-    "Ratio": 1.15,
-    "NbLayers": 35
+    "Size": 3,
+    "Thickness": 25,
+    "Ratio": 1.10,
+    "NbLayers": 20
   }
 }
