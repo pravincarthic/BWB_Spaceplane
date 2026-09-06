@@ -1,0 +1,79 @@
+Cavity pattern run log, local symmetry C3v
+timestamp: 20260906_114958
+log file: C:\Users\pravi\Documents\CavityPattern_C3V_Logs\cavity_run_20260906_114958.log
+document: BWB Spaceplane V2
+design mode: parametric
+Cut architecture: the seed cavity and the target body are both selected from the workspace; each placement is a copy of the selected seed moved into position, and all of them are consumed by a single combine cut.
+
+Stage: collecting settings
+Parameters
+  sketch_name: c3v_distr
+  group_separation_mm: 250.000000
+  ring_radius_mm: 15.000000
+  phase_offset_deg: 0.000000
+  include_centre_cavity: False
+  min_edge_to_edge_spacing_mm: 2.000000
+  penetration_epsilon_mm: 0.050000
+  duplicate_distance_tolerance_mm: 0.200000
+  duplicate_angle_tolerance_deg: 0.000000
+  surface_search_tolerance_mm: 50.000000
+  seam_tolerance_mm: 0.005000
+  max_cavity_count: 2000
+  max_group_count_parameter: cavityMaxGroups_C3V = 10
+  depth_sign: 1
+
+Stage: selecting bodies and faces
+  seed cavity body: Body1
+  target body: Body2
+  allowed faces: 3 covering 830016514.335006 mm2
+  excluded faces: 0
+
+Stage: measuring the seed cavity
+  seed anchor vertex in mm: 0.000000, 0.000000, 0.000000
+  seed footprint radius about the anchor: 11.180340 mm
+  local symmetry members per group: 6
+  mirror members per group: 3
+
+Stage: reading the distribution sketch
+  Group centres: 115 walked along 6 curve chain(s) totalling 28329.306788 mm at 250.000000 mm separation, plus 0 standalone sketch point(s).
+  distribution sketch curves: 6 curve(s) joined into 6 chain(s)
+  merged 1 coincident centre(s) at shared vertices or closed-loop wraps
+  group separation is arc length along the curve before snapping; on-surface spacing differs slightly wherever the curve sits off the skin
+
+Stage: generating placements
+
+Stage: cutting
+  boolean cut: succeeded. Cut 690 cavities into Body2.
+
+Selected entities
+  seed cavity body: Body1
+  target body: Body2
+  allowed faces: 3
+  allowed face area: 830016514.335006 mm2
+  excluded faces: 0
+  duplicate allowed picks ignored: 0
+  duplicate excluded picks ignored: 0
+  allowed faces dropped for also being excluded: 0
+
+Counts
+  Candidates evaluated: 690
+  Group centres read: 115
+  Groups evaluated: 115
+  Accepted placements: 690
+  Duplicates removed: 0
+  Other rejections: 0
+  Nearest surface distance across all candidates: min 0.000000 mm, max 0.014062 mm
+  Group centres: 115 walked along 6 curve chain(s) totalling 28329.306788 mm at 250.000000 mm separation, plus 0 standalone sketch point(s).
+  Allowed faces: 3 covering 830016514.335006 mm2
+
+Timing
+  cut_seconds: 302.072519
+  generate_seconds: 0.299657
+
+Notes
+  Manifest columns streamwise_x, streamwise_y and streamwise_z carry the local tangent reference axis of each surface frame. This script derives no flow direction and forces no cavity to face any global direction.
+  Duplicate detection compares position, depth-axis angle and handedness, so a mirrored member co-located with its rotation partner is kept rather than silently discarded.
+  Positions in the manifest are in mm; Fusion stores lengths internally in cm.
+  Manifest file: C:\Users\pravi\Documents\CavityPattern_C3V_Logs\cavity_manifest_20260906_114958.csv
+
+Run outcome: completed

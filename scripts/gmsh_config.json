@@ -5,8 +5,8 @@
 
   "gmsh_parameters": {
     "Mesh.RandomFactor": 1e-5,
-    "General.NumThreads": 14,
-    "Mesh.MeshSizeMin": 1,
+    "General.NumThreads": 16,
+    "Mesh.MeshSizeMin": 0.5,
     "Mesh.MeshSizeMax": 1000,
     "Mesh.MeshSizeFromCurvature": 20,
     "Mesh.Algorithm": 6,
