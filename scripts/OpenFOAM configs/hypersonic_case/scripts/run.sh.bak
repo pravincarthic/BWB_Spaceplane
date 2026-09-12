@@ -123,13 +123,8 @@ EOF
     LOG_FILE="$LOG_DIR/hy2Foam_run_$(date +%Y%m%d_%H%M%S).log"
     mpirun -np "$NP" hy2Foam -parallel | tee "$LOG_FILE"
 
-    echo ""
-    echo "Running rhoCentralFoam on $NP ranks"
-    echo "  675,000 fixed steps of 45 ns, endTime 0.030375 s"
-    echo "  20 volume writes, 675 surface frames, probes every 10 steps"
-    LOG_FILE="$LOG_DIR/rhoCentralFoam_$STAMP.log"
-    srun -np "$NP" rhoCentralFoam -parallel -fileHandler collated \
-        2>&1 | tee "$LOG_FILE"
+    echo "Reconstructing decomposed case"
+    reconstructPar
 else
     echo "Running rhoCentralFoam in serial (this is a 31M cell case - expect"
     echo "this to be useful only for a smoke test on a cut-down mesh)"

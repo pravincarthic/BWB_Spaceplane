@@ -1,0 +1,266 @@
+// -*- C++ -*- ---------------------------------------------------------------
+// system/surfacesShock
+//
+// Included from the functions{} block of system/controlDict, AFTER
+// system/monitorFunctions - the Ma and magGradRho fields sampled here are
+// created there, on the same 1000-step execute interval.
+// NO FoamFile header: every top-level entry becomes a function object.
+//
+// ===========================================================================
+// Shock-wave sampling for ParaView - written every 1000 timesteps
+// ===========================================================================
+// 1000 steps * 45 ns = 45 us per frame, 675 frames over the run. At
+// u_inf = 3169.7 m/s the shock system convects 143 mm between frames, so the
+// unsteady shock motion and any shock-shock interaction at the leading edges
+// is comfortably time-resolved.
+//
+// This is the ONLY output at that cadence besides the probes: the full 31M
+// cell volume fields are written just 20 times (system/controlDict). Surfaces
+// are two orders of magnitude cheaper than a volume write, which is the whole
+// point of sampling the shock this way rather than reconstructing it from the
+// 20 volume snapshots.
+//
+// FORMAT: vtp (VTK XML PolyData, binary). ParaView opens the
+// postProcessing/<name>/<time>/*.vtp series directly as a single animated
+// source. Do not switch to legacy "vtk" ASCII - it is roughly 4x larger and
+// ParaView has to re-parse it every frame.
+//
+// DISK: budget for this. An isosurface through a 31M cell mesh can come out
+// at a few hundred thousand triangles; 675 frames x 5 surfaces at that size
+// is tens of gigabytes. If the first few frames show the surfaces are larger
+// than the filesystem quota allows, the cheapest fixes in order are: drop
+// shockIsoP_outer, tighten the bounds on the cutting planes, then halve the
+// frame rate to writeInterval 2000.
+// ---------------------------------------------------------------------------
+
+shockSurfaces
+{
+    type            surfaces;
+    libs            (sampling);
+
+    executeControl  timeStep;
+    executeInterval 1000;
+    writeControl    timeStep;
+    writeInterval   1000;
+
+    surfaceFormat   vtp;
+	writeFormat     parallel;
+    formatOptions
+    {
+        vtp
+        {
+            format      binary;
+            precision   8;
+        }
+    }
+
+    // cellPoint gives smooth, continuous isosurfaces on the hybrid
+    // prism/tet mesh; the "cell" scheme would produce a faceted blocky
+    // surface that is hard to read in ParaView.
+    interpolationScheme cellPoint;
+
+    // Ma and magGradRho come from system/monitorFunctions. rho is included
+    // so a Schlieren-style volume render can be rebuilt in ParaView from the
+    // same files.
+    fields          (p T U rho Ma magGradRho);
+
+    surfaces
+    {
+        // ------------------------------------------------------------------
+        // Numerical Schlieren shock surface - the primary shock capture
+        // ------------------------------------------------------------------
+        // |grad rho| is the mesh-independent shock indicator: unlike a
+        // pressure isovalue it does not have to be retuned when the
+        // freestream changes, and it picks up the weak oblique shocks off the
+        // wing leading edges as well as the strong bow shock.
+        //
+        // Threshold: the normal-shock jump is rho 0.00407 -> 0.02901 kg/m3
+        // (a factor of 7.13). Smeared over the 3-5 cells the KNP scheme needs,
+        // in the few-millimetre cells that sit near the nose, that is
+        // |grad rho| of order 5-17 kg/m^4. Downstream the shock is weaker
+        // (oblique) and sits in coarser cells, so the same physical shock
+        // registers an order of magnitude lower.
+        //
+        // Two thresholds are therefore written: 5.0 tracks the strong nose
+        // region cleanly, 1.0 follows the shock all the way down the body at
+        // the cost of some noise. Check both on the first written frame and
+        // keep whichever suits; these values are estimates until then.
+        shockSchlierenStrong
+        {
+            type        isoSurface;
+            isoField    magGradRho;
+            isoValue    5.0;
+            isoMethod   topo;
+            interpolate true;
+        }
+
+        shockSchlierenWeak
+        {
+            type        isoSurface;
+            isoField    magGradRho;
+            isoValue    1.0;
+            isoMethod   topo;
+            interpolate true;
+        }
+
+        // ------------------------------------------------------------------
+        // Pressure isosurfaces - shock stand-off distance
+        // ------------------------------------------------------------------
+        // Freestream p = 292.12 Pa; the normal-shock value computed with the
+        // janaf gas is p2 = 35,445 Pa (p2/p1 = 121.3).
+        //
+        //   _outer at 2,000 Pa   (6.8x freestream)  - the leading edge of the
+        //                        compression, i.e. the outermost extent of
+        //                        the disturbed region. Use this one to
+        //                        measure shock stand-off.
+        //   _mid   at 17,800 Pa  ((p1+p2)/2)        - the geometric middle of
+        //                        the pressure jump, which is the conventional
+        //                        definition of "the shock surface" when
+        //                        comparing against an inviscid shock-fitting
+        //                        or a Billig correlation.
+        shockIsoP_outer
+        {
+            type        isoSurface;
+            isoField    p;
+            isoValue    2000;
+            isoMethod   topo;
+            interpolate true;
+        }
+
+        shockIsoP_mid
+        {
+            type        isoSurface;
+            isoField    p;
+            isoValue    17800;
+            isoMethod   topo;
+            interpolate true;
+        }
+
+        // ------------------------------------------------------------------
+        // Sonic surface
+        // ------------------------------------------------------------------
+        // Ma = 1 bounds the subsonic pocket behind the near-normal part of
+        // the bow shock at the nose and around any separation. Cheap, small,
+        // and it is the surface that tells you whether the nose region has
+        // gone unsteady.
+        sonicSurface
+        {
+            type        isoSurface;
+            isoField    Ma;
+            isoValue    1.0;
+            isoMethod   topo;
+            interpolate true;
+        }
+
+        // ------------------------------------------------------------------
+        // Cutting planes
+        // ------------------------------------------------------------------
+        // bounds are set on every plane to clip the sample to the near field.
+        // The far-field box is 200 m on a side; without bounds each plane
+        // would carry a large sheet of undisturbed freestream cells that adds
+        // file size and nothing else.
+
+        // Symmetry plane. The single most useful view: bow shock, shock layer,
+        // the whole boundary layer, and the wake in one image.
+        planeSymmetryY0
+        {
+            type        cuttingPlane;
+            planeType   pointAndNormal;
+            pointAndNormalDict
+            {
+                point   (25 0 1.3);
+                normal  (0 1 0);
+            }
+            bounds      (-5 -1 -25) (75 1 25);
+            interpolate true;
+        }
+
+        // Waterline plane through the vehicle mid-thickness - shows the
+        // planform shock pattern and the leading-edge shocks off both wings.
+        planeWaterlineZ
+        {
+            type        cuttingPlane;
+            planeType   pointAndNormal;
+            pointAndNormalDict
+            {
+                point   (25 0 1.3);
+                normal  (0 0 1);
+            }
+            bounds      (-5 -40 0.3) (75 40 2.3);
+            interpolate true;
+        }
+
+        // Cross-flow stations. These are what the shock shape and the
+        // spanwise shock-shock interaction are actually measured from, and
+        // they are the planes to compare against a Billig shock correlation.
+        // Spacing is 8 m from just aft of the nose to just forward of the
+        // trailing edge.
+        planeX05  { type cuttingPlane; planeType pointAndNormal;
+                    pointAndNormalDict { point ( 5 0 1.3); normal (1 0 0); }
+                    bounds (4.9 -30 -15) (5.1 30 15);  interpolate true; }
+
+        planeX12  { type cuttingPlane; planeType pointAndNormal;
+                    pointAndNormalDict { point (12 0 1.3); normal (1 0 0); }
+                    bounds (11.9 -30 -15) (12.1 30 15); interpolate true; }
+
+        planeX20  { type cuttingPlane; planeType pointAndNormal;
+                    pointAndNormalDict { point (20 0 1.3); normal (1 0 0); }
+                    bounds (19.9 -30 -15) (20.1 30 15); interpolate true; }
+
+        planeX28  { type cuttingPlane; planeType pointAndNormal;
+                    pointAndNormalDict { point (28 0 1.3); normal (1 0 0); }
+                    bounds (27.9 -30 -15) (28.1 30 15); interpolate true; }
+
+        planeX36  { type cuttingPlane; planeType pointAndNormal;
+                    pointAndNormalDict { point (36 0 1.3); normal (1 0 0); }
+                    bounds (35.9 -30 -15) (36.1 30 15); interpolate true; }
+
+        planeX44  { type cuttingPlane; planeType pointAndNormal;
+                    pointAndNormalDict { point (44 0 1.3); normal (1 0 0); }
+                    bounds (43.9 -30 -15) (44.1 30 15); interpolate true; }
+    }
+}
+
+// ===========================================================================
+// Vehicle surface, same 1000-step cadence
+// ===========================================================================
+// The wall patch on its own is small (it is a surface, not a volume) so it
+// can afford the fast cadence. This is what gives an animated surface
+// pressure and heat-flux map without touching the 20 volume writes, and it is
+// the field the wall-probe spectra are interpreted against.
+wallSurface
+{
+    type            surfaces;
+    libs            (sampling);
+
+    executeControl  timeStep;
+    executeInterval 1000;
+    writeControl    timeStep;
+    writeInterval   1000;
+	writeFormat 	parallel;
+
+    surfaceFormat   vtp;
+    formatOptions
+    {
+        vtp
+        {
+            format      binary;
+            precision   8;
+        }
+    }
+
+    interpolationScheme cellPoint;
+    fields          (p T U rho wallHeatFlux wallShearStress);
+
+    surfaces
+    {
+        Solid_Walls
+        {
+            type        patch;
+            patches     (Solid_Walls);
+            triangulate false;
+        }
+    }
+}
+
+// ***************************************************************************

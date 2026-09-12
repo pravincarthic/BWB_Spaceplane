@@ -14,7 +14,7 @@ set -euo pipefail
 # --------------------------------------------------------------------------
 # PLACEHOLDER: point this at your actual Gmsh mesh file
 # --------------------------------------------------------------------------
-MESH_FILE="$HOME/plainBWB/Gmsh_without_cavities_AoA_neg5_20260822.msh"
+MESH_FILE="~/plainBWB/Gmsh_without_cavities_AoA_neg5_20260822.msh"
 
 # --------------------------------------------------------------------------
 # UNITS: the .msh is in MILLIMETRES, OpenFOAM works in METRES
@@ -34,7 +34,7 @@ MESH_FILE="$HOME/plainBWB/Gmsh_without_cavities_AoA_neg5_20260822.msh"
 #
 # Set MESH_SCALE=1 if your .msh is already in metres.
 # --------------------------------------------------------------------------
-MESH_SCALE="${MESH_SCALE:-0.001}"
+MESH_SCALE=0.001
 
 CASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../case" && pwd)"
 

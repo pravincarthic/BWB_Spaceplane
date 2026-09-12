@@ -10,43 +10,145 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// This matches the actual hy2Foam (hyStrath/ivanZanardi fork) thermoType
-// convention, confirmed against constant/thermophysicalProperties in the
-// genericCase example shipped with the repo you pointed me at:
-// https://github.com/ivanZanardi/hypersonicfoam
+// Stock OpenFOAM v2412, solver rhoCentralFoam.
+//
+// rhoCentralFoam is a density-based solver built on psiThermo, so the thermo
+// type must be hePsiThermo. Single non-reacting pseudo-species ("air") with
+// frozen composition: calorically imperfect (janaf cp(T)) but chemically and
+// thermally in equilibrium - no two-temperature model, no finite-rate
+// chemistry. That is the correct model here because the peak temperature the
+// case actually reaches is bounded well below the onset of significant
+// dissociation (see below).
+//
+// Validity ceiling: Thigh = 6000 K.
+//   Freestream            250 K, 292.12 Pa, 3169.7 m/s  (M = 9.99)
+//   Normal-shock peak     T2 = 4256 K, p2 = 35445 Pa    (frozen, thermally perfect)
+//   Stagnation            T0 = 4331 K
+//   Isothermal wall       1500 K
+// The whole thermal range of the simulation therefore sits inside
+// 250 K <= T <= 4331 K, comfortably within the 200-6000 K fit window.
+// janaf aborts if a cell leaves [Tlow, Thigh], so the 6000 K ceiling is a
+// genuine safety margin over the physical peak, not a fitted limit.
 
 thermoType
 {
-    type            heRho2Thermo;
-    mixture         reacting2Mixture;
-    transport       BlottnerEucken;
-    thermo          decoupledEnergyModes;
-    energy          sensible2InternalEnergy;
-    equationOfState perfect2Gas;
-    specie          advancedSpecie;
+    type            hePsiThermo;
+    mixture         pureMixture;
+    transport       polynomial;
+    thermo          janaf;
+    equationOfState perfectGas;
+    specie          specie;
+    energy          sensibleInternalEnergy;
 }
 
-hyLight no;
-
-downgradeToSingleTv no;
-downgradeToSingleTemperature no;
-
-chemistryReader foam2ChemistryReader;
-
-// These paths are NOT placeholders - the referenced files are copied
-// verbatim into this case package from the real hyStrath repo
-// (Park 1993, 11-species air: N2, O2, NO, N2+, O2+, NO+, N, O, N+, O+, e-).
-foamChemistryFile "$FOAM_CASE/constant/chemDicts/hTCReactionsEarth93";
-
-foamChemistryThermoFile "$FOAM_CASE/constant/thermoDEM";
-
-twoTemperatureDictFile "$FOAM_CASE/constant/thermo2TModel";
-
-temperatureBounds
+mixture
 {
-    Tlow    200;
-    Thigh   20000;
-    ThighPatches   2000;
+    specie
+    {
+        molWeight   28.95999;   // dry air: X_N2 0.78157, X_O2 0.20964, X_Ar 0.00935
+    }
+
+    // ----------------------------------------------------------------------
+    // janaf, NASA 7-coefficient form, valid 200-6000 K, Tcommon 1000 K.
+    //
+    // Built as the mole-fraction-weighted sum of the Burcat N2, O2 and Ar
+    // polynomials (a_k^air = sum_i X_i a_k^i, which is exact for a molar
+    // NASA-7 fit of an ideal mixture at fixed composition). Reproduces:
+    //   cp(250 K)  =  998.7 J/kg/K   gamma = 1.4035
+    //   cp(300 K)  = 1003.6 J/kg/K   gamma = 1.4007
+    //   cp(1000 K) = 1140.6 J/kg/K   gamma = 1.3364
+    //   cp(4000 K) = 1319.5 J/kg/K   gamma = 1.2781
+    //   cp(6000 K) = 1357.2 J/kg/K   gamma = 1.2683
+    // cp is continuous at Tcommon to 0.19 percent (1142.8 vs 1140.6 J/kg/K).
+    // ----------------------------------------------------------------------
+    thermodynamics
+    {
+        Tlow        200;
+        Thigh       6000;
+        Tcommon     1000;
+
+        highCpCoeffs
+        (
+            3.0967790e+00
+            1.2286800e-03
+           -4.1438083e-07
+            6.5709113e-11
+           -3.8712714e-15
+           -9.8347050e+02
+            5.3432165e+00
+        );
+
+        lowCpCoeffs
+        (
+            3.3925835e+00
+            4.7208417e-04
+           -1.0323981e-06
+            2.3781326e-09
+           -1.2300513e-12
+           -1.0273449e+03
+            3.8930529e+00
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // polynomial transport, degree 7 (8 coefficients), valid 200-6000 K.
+    //
+    //   mu(T)    = sum_k muCoeffs[k]    * T^k     [kg/m/s]
+    //   kappa(T) = sum_k kappaCoeffs[k] * T^k     [W/m/K]
+    //
+    // Sutherland is NOT used: it underpredicts air viscosity by 25 percent at
+    // 3000 K and 34 percent at 6000 K, which would directly corrupt the
+    // wall heat flux and the boundary-layer thickness that sets the second
+    // Mack mode frequency.
+    //
+    // Reference data the fits were built against:
+    //   T < 500 K   Sutherland (1.458e-6 T^1.5/(T+110.4)) - accurate at low T
+    //   T > 1000 K  Blottner curve fits for N2/O2/Ar combined with the Wilke
+    //               mixing rule - the standard high-temperature air model
+    //   500-1000 K  smoothstep blend (the two agree to 0.7 percent at 500 K
+    //               and to 0.6 percent at 1000 K, so the blend is seamless)
+    //   kappa       modified Eucken, kappa = mu*Cv*(1.32 + 1.77*R/Cv), with
+    //               Cv from the janaf polynomials above
+    //
+    // Least-squares fit accuracy over the full 200-6000 K window:
+    //   mu     max relative error 1.06 percent (worst point is T = 200 K)
+    //   kappa  max relative error 1.41 percent (worst point is T = 200 K)
+    // Both polynomials stay strictly positive and monotonic over 150-6500 K,
+    // so a transient temperature excursion just outside the window cannot
+    // produce a negative transport coefficient before janaf traps it.
+    //
+    //   T [K]      mu [kg/m/s]     kappa [W/m/K]    Pr
+    //     250      1.601e-05       2.315e-02        0.691
+    //    1000      4.149e-05       6.759e-02        0.700
+    //    4000      1.090e-04       2.041e-01        0.705
+    //    6000      1.492e-04       2.861e-01        0.708
+    // ----------------------------------------------------------------------
+    transport
+    {
+        muCoeffs<8>
+        (
+            7.9169946858e-07
+            7.4052368791e-08
+           -6.2070699737e-11
+            4.1391530691e-14
+           -1.5620278965e-17
+            3.2921620062e-21
+           -3.6110111110e-25
+            1.6038125006e-29
+        );
+
+        kappaCoeffs<8>
+        (
+            2.5006995661e-03
+            9.4310340316e-05
+           -5.5763354154e-08
+            3.9203537989e-11
+           -1.5760667696e-14
+            3.4736233232e-18
+           -3.9161476565e-22
+            1.7658745310e-26
+        );
+    }
 }
 
 // ************************************************************************* //

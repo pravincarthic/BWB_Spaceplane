@@ -10,19 +10,25 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// Solver block corrected to match the real hy2Foam solved-variable set
-// (checked against genericCase/system/fvSolution in the actual repo):
-// the primary conservative variables are rho, rhoU, rhoE, and rhoEv.*
-// (per-mode vibrational energy density). Tt and Tv are NOT solved directly
-// by a linear solver - they are back-computed from those conservative
-// quantities by the thermo package (decoupledEnergyModes). The (h|e).*
-// block below is what that back-computation actually needs solved.
-// No (k|omega|epsilon) block - not applicable, simulationType is laminar
-// (ILES only, see constant/turbulenceProperties).
+// rhoCentralFoam is a density-based, explicit solver. The conservative
+// variables rho, rhoU and rhoE are advanced explicitly, so their "solver"
+// is diagonal - a straight division by the diagonal, no iteration.
+//
+// The U and e entries are only used for the implicit diffusion correction
+// step that rhoCentralFoam applies after the explicit convective update
+// (viscous momentum diffusion and thermal conduction). Because the energy
+// variable is sensibleInternalEnergy, the energy field is named "e"; with
+// sensibleEnthalpy it would be "h". Keeping the regex "(e|h)" here means the
+// dictionary stays valid if that choice is ever revisited.
+//
+// There is no PIMPLE/SIMPLE block and no pressure equation: pressure is
+// recovered from the equation of state, not solved for.
+//
+// No (k|epsilon|omega|nuTilda) block - simulationType is laminar (ILES).
 
 solvers
 {
-    "(rho|rhoU|rhoE|rhoEv.*)"
+    "(rho|rhoU|rhoE)"
     {
         solver          diagonal;
     }
@@ -33,26 +39,21 @@ solvers
         smoother        GaussSeidel;
         nSweeps         2;
         tolerance       1e-09;
-        relTol          1e-02;
+        relTol          0;
     }
 
-    "(h|e).*"
+    "(e|h)"
     {
         $U;
         tolerance       1e-10;
-        relTol          1e-03;
-        minIter         1;
-        maxIter         400;
-    }
-
-    Yi
-    {
-        solver          PBiCG;
-        preconditioner  DILU;
-        tolerance       1e-12;
         relTol          0;
-        maxIter         10;
     }
 }
+
+// relTol 0 on both diffusion solves: at a fixed 45 ns step these systems are
+// strongly diagonally dominant and converge in a couple of sweeps, so solving
+// them to absolute tolerance costs almost nothing and removes a source of
+// step-to-step noise that would otherwise show up in the probe pressure
+// spectra as a broadband floor.
 
 // ************************************************************************* //

@@ -1,0 +1,69 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      T;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Single static temperature. Replaces the two-temperature pair Tt/Tv used by
+// the previous hy2Foam configuration: rhoCentralFoam solves one energy
+// equation (sensibleInternalEnergy), so there is exactly one temperature.
+//
+//   Atmosphere / Inlet / Outlet   250 K   (freestream, 130,000 ft)
+//   Solid_Walls                  1500 K   (isothermal, radiative-equilibrium
+//                                          TPS surface estimate)
+//
+// Peak in-field temperature expected behind the bow shock is 4256 K, with a
+// stagnation value of 4331 K - both inside the janaf Thigh = 6000 K ceiling
+// set in constant/thermophysicalProperties.
+
+dimensions      [0 0 0 1 0 0 0];
+
+internalField   uniform 250.0;
+
+boundaryField
+{
+    Inlet
+    {
+        // Supersonic inflow: the whole state is imposed. inletOutlet keeps
+        // the boundary well posed if a start-up transient briefly reverses
+        // a face, and reverts to fixedValue as soon as inflow is restored.
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+
+    Atmosphere
+    {
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+
+    Solid_Walls
+    {
+        // Isothermal wall at 1500 K. Plain fixedValue is correct here: the
+        // flow is dense continuum (Kn << 1 at 130,000 ft on a y+<1 mesh), so
+        // no temperature-jump / slip wall condition is needed.
+        //
+        // A cold wall relative to the 4331 K stagnation temperature is also
+        // what makes the second Mack mode the dominant instability on this
+        // configuration - wall cooling damps the first mode and amplifies
+        // the second, which is the mode the PSE probes below are sized for.
+        type            fixedValue;
+        value           uniform 1500.0;
+    }
+
+    Outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 250.0;
+        value           uniform 250.0;
+    }
+}
+
+// ************************************************************************* //

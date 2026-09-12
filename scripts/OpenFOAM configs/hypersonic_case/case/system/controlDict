@@ -5,121 +5,134 @@ FoamFile
     version     2.0;
     format      ascii;
     class       dictionary;
+    location    "system";
     object      controlDict;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-application     hy2Foam;
+// ============================================================================
+// rhoCentralFoam - OpenFOAM v2412 - BWB spaceplane, M 9.99 at 130,000 ft
+// ============================================================================
+// Stock OpenCFD v2412. No hyStrath / hy2Foam libraries are loaded and none
+// are required: every dictionary in this case uses core OpenFOAM models only.
+// ============================================================================
 
-startFrom       startTime;
+application     rhoCentralFoam;
+
+// latestTime lets a killed job be resubmitted with no edit; on a clean case
+// the only time directory is 0, so it is equivalent to startFrom startTime.
+startFrom       latestTime;
 startTime       0;
 
 stopAt          endTime;
 
-// PLACEHOLDER: adjust to your required flow-through time / statistics window. A rough guess for a body length L: t_flowthrough ~ few*L/u_inf, u_inf = 3169.7 m/s. Set once you know your reference length.
-endTime         0.03;
+// ---------------------------------------------------------------------------
+// Time stepping: FIXED 45 ns, 675,000 steps
+// ---------------------------------------------------------------------------
+//   endTime = 675000 * 45e-9 = 0.030375 s
+//
+// A fixed step (adjustTimeStep no) is deliberate, not a fallback. The probe
+// time series that feed the PSE second-Mack-mode analysis must be uniformly
+// sampled: an adaptive step produces unevenly spaced samples, which cannot be
+// FFT'd without resampling and which smears the narrow instability peak.
+//
+// Courant check for the 45 ns step (see docs/PARAMETERS.md for the working):
+//   fastest wave speed  |u| + a = 3169.7 + 317.4 = 3487 m/s (freestream)
+//   mesh minimum size   0.5 mm  (Mesh.MeshSizeMin in scripts/gmsh_config.json)
+//   => Co_max = 3487 * 45e-9 / 0.5e-3 = 0.314
+// which sits under the 0.37 CFL target with about 15 percent of headroom.
+// Inverting the target: Co = 0.37 at 45 ns requires cells no smaller than
+// 0.424 mm anywhere in the domain. The 0.5 mm floor in the mesh generator is
+// what makes the fixed step safe - if the mesh is ever refined below 0.424 mm
+// the step MUST come down with it or the explicit solver will diverge.
+//
+// maxCo below is not used to adapt anything while adjustTimeStep is no; it is
+// kept as the documented design target, and the actual running value is
+// monitored every 100 steps by the CourantNo/courantMonitor pair in
+// system/monitorFunctions. Watch that log output on the first restart.
+//
+// Physical coverage: 0.030375 s at u_inf = 3169.7 m/s over the 48.061 m body
+// is 2.0 flow-through times. That is enough to establish the shock layer and
+// to give a 30.4 ms probe record (32.9 Hz frequency resolution, 1215 cycles
+// of the 40 kHz lower band edge), but it is short for converged turbulence
+// statistics - treat the fieldAverage output as a laminar mean baseflow for
+// PSE, which is what it is for, not as an LES statistical average.
+// ---------------------------------------------------------------------------
+deltaT          4.5e-08;
+endTime         0.030375;
 
-deltaT          1e-7;         // initial guess, overridden by adjustTimeStep
+adjustTimeStep  no;
+maxCo           0.37;       // design target, monitored not enforced
+maxDeltaT       4.5e-08;
 
-writeControl    adjustableRunTime;
-writeInterval   1e-4;
+// ---------------------------------------------------------------------------
+// Volume field writes: 20 over the run
+// ---------------------------------------------------------------------------
+//   675000 / 33750 = 20 complete field dumps, at 1.51875 ms intervals.
+// These are the full 31M-cell volume snapshots. Surface and probe output is
+// far more frequent and is configured in the included function files.
+// ---------------------------------------------------------------------------
+writeControl    timeStep;
+writeInterval   3375;
 
-purgeWrite      0;   // Needed for Paraview Visualisations
+purgeWrite      0;          // keep all 20 - needed for the ParaView time series
 
 writeFormat     binary;
 writePrecision  10;
-writeCompression on;
+
+// Compression is OFF on purpose. With the collated file handler each write is
+// already a single large sequential stream per field; gzip serialises that
+// stream through one thread and, at 31M cells on 384 ranks, costs more wall
+// time than the disk saving is worth.
+writeCompression off;
 
 timeFormat      general;
-timePrecision   8;
+timePrecision   10;         // 45 ns steps need more digits than the default 6
 
-runTimeModifiable false;
+runTimeModifiable false;    // no dictionary re-reads: this is a long batch run
 
-// Adaptive timestepping: essential given the mu(T) viscosity jump across the bow shock and the fine wall-resolved (y+<1) prism layer cells.
-adjustTimeStep  yes;
-maxCo           0.4;         // conservative given complex/extreme shock-shock interaction expected near leading edges, change to 0.2 if crashes occur
-maxDeltaT       3e-7;
+// ---------------------------------------------------------------------------
+// Collated output
+// ---------------------------------------------------------------------------
+// One file per field per write instead of 384 per field per write. On this
+// case that is the difference between ~7,700 files per volume write and 20.
+// It removes the metadata storm that otherwise dominates the write time on a
+// parallel filesystem at this rank count, and it means reconstructPar is not
+// needed at all - ParaView reads the collated case directly through the
+// .foam reader, and postProcessing/ output is already collated by rank 0.
+//
+// Every parallel utility in the workflow (decomposePar, rhoCentralFoam,
+// foamToVTK, postProcess) must agree on this setting, so it is set here in
+// the case rather than per-command. scripts/run.sh additionally passes
+// -fileHandler collated explicitly, which is harmless belt-and-braces.
+//
+// maxThreadFileBufferSize 0 makes the collated writes synchronous (rank 0
+// writes and waits). Non-zero enables a background write thread, which is
+// faster but needs MPI_THREAD_MULTIPLE from the MPI build; leave it at 0
+// unless the site MPI is known to support that.
+// ---------------------------------------------------------------------------
+OptimisationSwitches
+{
+    fileHandler             collated;
+    maxThreadFileBufferSize 0;
+}
 
-// REQUIRED - confirmed against genericCase/system/controlDict in the real repo: hy2Foam needs this custom finite-volume library loaded at runtime.
-libs ("libstrathFiniteVolume.so");
-
+// ---------------------------------------------------------------------------
+// Function objects
+// ---------------------------------------------------------------------------
+// Split across included files for readability. Order matters: derived fields
+// (Ma, magGradRho, Co) are created in monitorFunctions and consumed by the
+// sampling in surfacesShock, so monitorFunctions must be included first.
+//
+// The included files deliberately carry NO FoamFile header - everything
+// inside functions{} is constructed as a function object, and a stray
+// FoamFile sub-dictionary here would be treated as one and fail.
+// ---------------------------------------------------------------------------
 functions
 {
-    forces
-    {
-        type            forces;
-        // The ported fork's force objects support multi2Thermo.
-        libs            ("libstrathForces.so");
-        writeControl    adjustableRunTime;
-        writeInterval   1e-4;
-
-        // FIXED: "wall" does not exist in this mesh. final_meshing.py tags the vehicle surface as physical group "Solid_Walls" (case-sensitive).
-        patches         (Solid_Walls);
-        rho             rhoInf;
-        rhoInf          0.00407069;      // freestream density at 130,000 ft
-        CofR            (25.717 0.000 3.022);   // center of rotation - adjust to vehicle CoM
-        // FIXED: was 3% off the actual meshed body length. Measured directly from the STEP file's vehicle-solid bounding box (X-extent, as-meshed, rotated frame): 48060.7 mm = 48.061 m.
-        lRef            48.061;
-        Aref            912.1;        // Change to real value in m^2 as seen in a CAD viewer from the top view
-    }
-    
-    forceCoeffs
-    {
-        type            forceCoeffs;
-        libs            ("libstrathForces.so");
-        writeControl    adjustableRunTime;
-        writeInterval   1e-4;
-
-        // FIXED: see forces block above.
-        patches         (Solid_Walls);
-        rho             rhoInf;
-        rhoInf          0.00407069;
-        CofR            (25.717 0.000 3.022);
-        lRef            48.061;
-        Aref            912.1;
-
-        magUInf         3169.7;     // freestream velocity magnitude
-        liftDir         (0 0 1);    // lift direction (Z, normal to flow)
-        dragDir         (1 0 0);    // drag direction (X, flow-aligned)
-        pitchAxis       (0 1 0);    // Nose pitch by -5 deg
-    }
-
-    fieldMinMax
-    {
-        type            fieldMinMax;
-        libs            ("libfieldFunctionObjects.so");
-        writeControl    adjustableRunTime;
-        writeInterval   1e-4;
-        fields          (p Tt Tv);
-    }
-
-    shockWave3D
-    {
-        type            surfaces;
-        libs            ("libsampling.so");
-
-        // FIXED: was writeControl timeStep + writeInterval 300, which under adjustTimeStep=yes gives an unpredictable physical-time cadence and (at these deltaT bounds) lands near ~500 frames over the run, not
-        // the requested 1000. adjustableRunTime + endTime/1000 guarantees ~1000 evenly time-spaced frames regardless of how the adaptive timestep behaves.
-        writeControl    adjustableRunTime;
-        writeInterval   3e-5;        // = endTime / 1000 = 0.03 / 1000
-        surfaceFormat   vtk;
-        fields          ( U Tt Tv p );
-
-        interpolationScheme cellPoint;
-
-        surfaces
-        {
-            bowShockIso
-            {
-                type        isoSurface;
-                // Keep the v1706 point algorithm; v2412 defaults to topo.
-                isoMethod   point;
-                isoField    p;
-                // FIXED: freestream p = 292.12 Pa; theoretical normal-shock jump at Mach 10 gives p2 ~ 34,032 Pa (p2/p1 ~ 116.5). The previous isoValue of 1000 Pa (~3.4x freestream) sits right at the very start of the compression and can pick up weak
-                // off-body waves instead of the bow shock itself. 10,000 Pa (~34 x freestream, ~30% of the post-shock value) sits comfortably inside the shock layer. Adjust once you see the actual pressure field - this is still an estimate.
-                isoValue    10000;
-                interpolate true;
-            }
-        }
-    }
+    #include "monitorFunctions"
+    #include "probesPSE"
+    #include "surfacesShock"
 }
+
+// ************************************************************************* //

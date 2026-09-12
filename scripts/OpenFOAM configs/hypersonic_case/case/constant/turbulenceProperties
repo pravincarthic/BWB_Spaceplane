@@ -10,11 +10,24 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// OpenCFD OpenFOAM v2412 with the ported hypersonicfoam hyStrath solvers.
-// ILES: molecular transport and the Kurganov flux limiters provide dissipation.
-// No explicit eddy viscosity or subgrid model is selected.
-// Stokes is registered by the fork's turbulentFluidThermoModels.C and uses
-// the base OpenFOAM laminar selector. In v2412 its selection key is "model".
+// ILES on stock OpenFOAM v2412.
+//
+// simulationType laminar + model Stokes selects Foam::laminarModels::Stokes,
+// the plain Newtonian stress model: the deviatoric stress is built purely
+// from the molecular mu(T) supplied by constant/thermophysicalProperties.
+// No eddy viscosity, no subgrid-scale model, no wall function, no nut or
+// alphat field is created or read.
+//
+// The only other dissipation in the run is numerical, from the vanLeer
+// limiters on the Kurganov (KNP) reconstruction in system/fvSchemes. That
+// limiter dissipation IS the implicit subgrid model - which is exactly what
+// makes this an ILES rather than an under-resolved DNS or a modelled LES.
+// Do not add a Smagorinsky/WALE block here: it would double-count the
+// subgrid dissipation on top of the limiters.
+//
+// This also keeps the baseflow that the PSE solver consumes free of any
+// modelled eddy viscosity, which a linear-stability analysis of the second
+// Mack mode requires - the mean flow must be the laminar one.
 
 simulationType  laminar;
 

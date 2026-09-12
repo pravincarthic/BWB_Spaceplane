@@ -19,7 +19,7 @@ ulimit -s unlimited
 ulimit -c unlimited
 
 source $SCRATCH/$USER/OpenFOAM/OpenFOAM-v1706/etc/bashrc
-cd $SCRATCH/$USER/cavity_BWB/hypersonic_case/case
+cd $SCRATCH/$USER/cavityBWB/hypersonic_case/case
 
 echo "Checking Mesh Quality..."
 srun -n 384 checkMesh -allTopology -allGeometry -parallel 2>&1 | tee ../../log.checkmesh.log
@@ -40,10 +40,10 @@ srun -n 384 checkMesh -allTopology -allGeometry -parallel 2>&1 | tee ../../log.c
 
 # Execution Workflow with Proper Logging and Pipe Redirection
 # Launch OpenFOAM solver with srun on 384 MPI ranks
-SOLVER="hy2Foam"  # Replace with your specific solver (e.g., scalarTransportFoam, hyStrath, etc.)
+SOLVER="rhoCentralFoam"  # stock OpenFOAM v2412; see scripts/OpenFOAM configs/hypersonic_case/
 
 echo "Executing $SOLVER on $SLURM_NTASKS ranks..."
-srun -n 384 --cpu-bind=cores $SOLVER -parallel 2>&1 | tee ../../log.$SOLVER.log
+srun -n 384 --cpu-bind=cores $SOLVER -parallel -fileHandler collated 2>&1 | tee ../../log.$SOLVER.log
 EXIT_CODE=$?
 echo "$SOLVER exited with code $EXIT_CODE"
 exit "$EXIT_CODE"
