@@ -11,60 +11,83 @@ FoamFile
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 // ============================================================================
-// KNP flux scheme + vanLeer limiters, ILES only
+// rhoCentralFoam, OpenFOAM v2412: Kurganov (KNP) flux + vanLeer limiters, ILES
 // ============================================================================
-// Checked against hyStrath/applications/solvers/compressible/hy2Foam/numerics/fluxesCalculation.H and numerics/KNP-KT.H: the valid fluxScheme string values are Kurganov, Tadmor, ROE, KFVS, LxF - there is no literal
-// "KNP" string. "Kurganov" IS the Kurganov-Noelle-Petrova (KNP) central- upwind scheme (confirmed directly in KNP-KT.H: "a_pos = ap/(ap - am); //- Eq.9 KNP").
-// Every reconstructed/limited field (U, rho, T, species) uses vanLeer.
-// No explicit SGS term is added anywhere in this file (see constant/turbulenceProperties: simulationType laminar, model Stokes) - the limiters below are deliberately the ONLY numerical
-// dissipation mechanism besides real molecular transport. That is what makes this a pure ILES run.
+// fluxScheme is read by rhoCentralFoam itself (not by a div scheme). The two
+// values stock rhoCentralFoam accepts are:
+//
+//   Kurganov  - Kurganov, Noelle & Petrova central-upwind (KNP). Uses
+//               one-sided local wave speeds a+ and a-, so the numerical
+//               dissipation collapses towards zero in smooth, low-Mach-
+//               gradient regions and only switches on across discontinuities.
+//   Tadmor    - Kurganov & Tadmor (KT). Symmetric wave speed, uniformly more
+//               dissipative.
+//
+// Kurganov is the required choice here for two reasons: it captures the bow
+// shock without the KT scheme's extra smearing, and - critically for this
+// case - its low dissipation in smooth regions is what lets the second Mack
+// mode wavepacket survive advection down the 48 m boundary layer to the
+// downstream PSE probes instead of being numerically damped out.
+//
+// Every reconstruction is vanLeer-limited. Those limiters are the ONLY
+// subgrid dissipation in the run: constant/turbulenceProperties selects
+// laminar/Stokes, so no explicit SGS model contributes. That is the ILES
+// closure.
 // ============================================================================
 
-fluxScheme            Kurganov;      // = KNP central-upwind scheme
+fluxScheme      Kurganov;
 
 ddtSchemes
 {
-    default           Euler;
+    // First-order Euler. rhoCentralFoam is explicit and this case runs at a
+    // fixed 45 ns step with Co ~ 0.31, so the temporal truncation error is
+    // small; Euler also keeps the scheme monotone across the bow shock,
+    // where a backward/CrankNicolson step would ring.
+    default         Euler;
 }
 
 gradSchemes
 {
-    default           Gauss linear;
-    grad(U)           cellLimited Gauss linear 1;
+    default         Gauss linear;
 }
 
 divSchemes
 {
-    default             none;
+    default         none;
 
-    div(tauMC)          Gauss linear;
-
-    div(phi,U)          Gauss vanLeerV;
-
-    // Species diffusion / convection (11-species) - vanLeer, unchanged
-    div(diffusiveFluxes)   Gauss linear;
-    div(phi,Yi_h)        Gauss vanLeer;
-
-    // Needed when there are electrons in the gas mix (e- present here)
-    div(U)              Gauss linear;
+    // The only explicit divergence in rhoCentralFoam is the off-diagonal
+    // part of the viscous stress tensor; convection is handled entirely by
+    // the KNP flux above, not by a div scheme.
+    div(tauMC)      Gauss linear;
 }
 
 laplacianSchemes
 {
-    default           Gauss linear corrected;
+    // Diffusion terms (viscous momentum, thermal conduction). "corrected"
+    // is the non-orthogonality-correcting surface normal gradient, needed
+    // on this hybrid prism/tet mesh.
+    default         Gauss linear corrected;
 }
 
 interpolationSchemes
 {
-    default          linear;
+    default         linear;
+
+    // Face reconstruction of the primitive variables for the KNP flux.
+    // vanLeer is a smooth, symmetric, second-order TVD limiter - monotone
+    // through the shock, and far less dissipative in smooth flow than
+    // minmod, which matters for the instability wave. vanLeerV is the
+    // vector form: it applies a single limiter value to all three velocity
+    // components based on the most-limited direction, which keeps the
+    // reconstructed velocity vector from being rotated by the limiter.
     reconstruct(rho) vanLeer;
-    reconstruct(U)   vanLeer;
+    reconstruct(U)   vanLeerV;
     reconstruct(T)   vanLeer;
 }
 
 snGradSchemes
 {
-    default          corrected;
+    default         corrected;
 }
 
 // ************************************************************************* //

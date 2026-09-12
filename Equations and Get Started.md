@@ -15,10 +15,10 @@ This preserves a higher effective $L/D$ ratio across the reentry corridor, enabl
 # Getting Started
 
 ## Prerequisites
-* **Environment:** OpenFOAM (strictly v1706) with `hyStrath` / `hy2Foam` extension compiled.
+* **Environment:** OpenFOAM **v2412** (stock OpenCFD). No `hyStrath` / `hy2Foam` build is needed - `rhoCentralFoam` ships with OpenFOAM.
 * **CAD / Meshing:** `SALOME NETGEN 1D-2D-3D` or `SALOME GMSH` with high-refinement surface feature edges.
 * **HPC Environment:** SLURM workload manager with Intel MPI or OpenMPI.
-## Quick Start: Running a hy2Foam Simulation
+## Quick Start: Running a rhoCentralFoam Simulation
 1. **Clone the repository:**
    ```bash
    git clone [https://github.com/pravincarthic/BWB_Spaceplane/](https://github.com/pravincarthic/BWB_Spaceplane/)
@@ -35,10 +35,11 @@ This preserves a higher effective $L/D$ ratio across the reentry corridor, enabl
    checkMesh
 5. **Execute Solver (Parallel):**
    ```bash
-   decomposePar
-   mpirun -np $NPROC hy2Foam -parallel > log.hy2Foam 2>&1 &
+   decomposePar -fileHandler collated
+   mpirun -np 384 rhoCentralFoam -parallel -fileHandler collated > log.rhoCentralFoam 2>&1 &
 6. **Post-Processing:**
-   Reconstruct case and launch ParaView (in case of ParaView GUI, create an empty `.foam` file and open it.):
+   With collated output there is no `reconstructPar` step - ParaView reads the
+   decomposed case directly. Open the `case.foam` file that ships with the case
+   and select "Decomposed Case" in the reader panel:
    ```bash
-   reconstructPar
-   paraFoam
+   paraview case/case.foam

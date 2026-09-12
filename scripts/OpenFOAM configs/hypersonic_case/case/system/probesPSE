@@ -1,0 +1,304 @@
+// -*- C++ -*- ---------------------------------------------------------------
+// system/probesPSE
+//
+// Included from the functions{} block of system/controlDict.
+// NO FoamFile header: every top-level entry becomes a function object.
+//
+// ===========================================================================
+// PSE / second Mack mode instrumentation
+// ===========================================================================
+//
+// WHAT THE SAMPLING RATE HAS TO BE
+// --------------------------------
+// The second Mack mode is a trapped acoustic wave in the boundary layer. Its
+// frequency scales as f2 ~ u_e / (2 delta), so it sweeps downward along the
+// body as the boundary layer thickens. Using the reference-temperature
+// (Eckert) method for a cold-wall (Tw 1500 K, Te 250 K, Me 9.99) laminar
+// layer, T* = 1794 K and Re*/x = 2.90e4 per metre, giving delta = 5x/sqrt(Re*x):
+//
+//     x [m]     delta [mm]     f2 [kHz]
+//      0.10          9.3          170
+//      0.25         14.7          108
+//      1.0          29.4           54
+//      3.0          50.9           31
+//     10.0          92.9           17
+//     24.0        143.9            11
+//     47.0        201.3            7.9
+//
+// So the band that has to be captured across the whole vehicle is roughly
+// 5 kHz to 250 kHz, the upper end being set by the first station aft of the
+// nose. (For reference, pse_solver/config/mach10_130kft.json scans
+// 40-320 kHz, which is the same physics on its 0.2-2.0 m cone.)
+//
+// Sampling every 10 solver steps at the fixed 45 ns step gives:
+//
+//     sample interval  dt_s = 10 * 45 ns    = 450 ns
+//     sampling rate    fs   = 1/dt_s        = 2.2222 MHz
+//     NYQUIST          fN   = fs/2          = 1.1111 MHz
+//     record length    T    = 0.030375 s
+//     resolution       df   = 1/T           = 32.92 Hz
+//     samples          N    = 675000/10     = 67,500 per probe
+//
+// fN = 1.111 MHz is 4.4x the 250 kHz top of the band of interest, so the
+// second mode is oversampled by a wide margin and no anti-alias filtering or
+// resampling is needed before the FFT. df = 32.9 Hz resolves the narrow
+// second-mode peak (typical bandwidth several kHz) with hundreds of bins.
+//
+// Do not coarsen this to save disk. 67,500 rows x 66 wall probes x 6 scalars
+// is about 200 MB of ASCII in total, which is nothing next to a single 31M
+// cell volume write.
+//
+// Spatially, the shortest resolved wave is lambda = 0.9*u_inf/f. At 250 kHz
+// that is 11.4 mm, or 23 cells across at the 0.5 mm mesh minimum - adequate.
+// Above about 500 kHz the mesh, not the sampling rate, becomes the limit.
+//
+// PROBE PLACEMENT - READ THIS BEFORE THE FIRST PRODUCTION RUN
+// -----------------------------------------------------------
+// The coordinates below are NOMINAL. They are built from the vehicle solid's
+// bounding box (X 0.057-49.643, Y -22.459-14.213, Z -0.022-2.600 m) by
+// placing points 0.30 m clear of the body above and below, and they rely on
+// patchProbes snapping each point to the nearest Solid_Walls face. That is
+// robust for a thin, near-planform body but it is still a geometric guess.
+//
+// Run scripts/make_pse_probes.py after the mesh exists to regenerate this
+// file from the real wall surface. It extracts Solid_Walls, finds the true
+// windward and leeward faces at each requested station, and writes exact
+// on-surface probe points and true wall-normal rakes. The nominal values here
+// only exist so the case is runnable before that step.
+// ---------------------------------------------------------------------------
+
+// ===========================================================================
+// 1. Wall-pressure probes - the primary second-mode signal
+// ===========================================================================
+// Wall pressure is the standard experimental and computational observable for
+// the second mode (it is what PCB/PVDF sensors measure in a quiet tunnel), and
+// it is the quantity the PSE N-factor envelope is normally reported against.
+//
+// patchProbes, not probes: patchProbes snaps to the nearest face centre on the
+// named patch, so the sample is exactly ON the wall regardless of how well the
+// nominal coordinate matches the real surface. A plain "probes" object would
+// silently land inside the solid or out in the shock layer.
+
+pseWallWindward
+{
+    type            patchProbes;
+    libs            (sampling);
+    patches         (Solid_Walls);
+
+    // 45 ns * 10 = 450 ns sampling, fN = 1.111 MHz - see the header.
+    executeControl  timeStep;
+    executeInterval 10;
+    writeControl    timeStep;
+    writeInterval   10;
+
+    // rho and T are carried alongside p so the PSE side can non-dimensionalise
+    // the fluctuation amplitudes without re-reading the volume fields.
+    fields          (p T U rho);
+
+    // 26 streamwise stations, clustered near the nose where the second mode
+    // first becomes unstable and its frequency is highest.
+    probeLocations
+    (
+            (0.250    0.000    -0.300  )
+            (0.500    0.000    -0.300  )
+            (0.750    0.000    -0.300  )
+            (1.000    0.000    -0.300  )
+            (1.500    0.000    -0.300  )
+            (2.000    0.000    -0.300  )
+            (2.500    0.000    -0.300  )
+            (3.000    0.000    -0.300  )
+            (4.000    0.000    -0.300  )
+            (5.000    0.000    -0.300  )
+            (6.000    0.000    -0.300  )
+            (8.000    0.000    -0.300  )
+            (10.000   0.000    -0.300  )
+            (12.000   0.000    -0.300  )
+            (14.000   0.000    -0.300  )
+            (17.000   0.000    -0.300  )
+            (20.000   0.000    -0.300  )
+            (23.000   0.000    -0.300  )
+            (26.000   0.000    -0.300  )
+            (29.000   0.000    -0.300  )
+            (32.000   0.000    -0.300  )
+            (35.000   0.000    -0.300  )
+            (38.000   0.000    -0.300  )
+            (41.000   0.000    -0.300  )
+            (44.000   0.000    -0.300  )
+            (47.000   0.000    -0.300  )
+    );
+}
+
+pseWallLeeward
+{
+    $pseWallWindward;
+
+    // Same stations on the upper surface. At -5 deg the leeward boundary
+    // layer is thicker and its second mode correspondingly lower in
+    // frequency; it is also the side where crossflow and separation are more
+    // likely, so it is worth the extra 26 probes to have both.
+    probeLocations
+    (
+            (0.250    0.000    2.900   )
+            (0.500    0.000    2.900   )
+            (0.750    0.000    2.900   )
+            (1.000    0.000    2.900   )
+            (1.500    0.000    2.900   )
+            (2.000    0.000    2.900   )
+            (2.500    0.000    2.900   )
+            (3.000    0.000    2.900   )
+            (4.000    0.000    2.900   )
+            (5.000    0.000    2.900   )
+            (6.000    0.000    2.900   )
+            (8.000    0.000    2.900   )
+            (10.000   0.000    2.900   )
+            (12.000   0.000    2.900   )
+            (14.000   0.000    2.900   )
+            (17.000   0.000    2.900   )
+            (20.000   0.000    2.900   )
+            (23.000   0.000    2.900   )
+            (26.000   0.000    2.900   )
+            (29.000   0.000    2.900   )
+            (32.000   0.000    2.900   )
+            (35.000   0.000    2.900   )
+            (38.000   0.000    2.900   )
+            (41.000   0.000    2.900   )
+            (44.000   0.000    2.900   )
+            (47.000   0.000    2.900   )
+    );
+}
+
+pseWallSpanwise
+{
+    $pseWallWindward;
+
+    // Two spanwise rakes on the windward surface, at x = 20 m and x = 35 m.
+    // These exist to measure the spanwise wavenumber beta of the disturbance.
+    // The PSE configuration currently runs beta = 0 (a purely 2D second mode);
+    // if these rakes show coherent phase variation across the span, that
+    // assumption is wrong for this geometry and n_beta in
+    // pse_solver/config/*.json needs to be opened up.
+    probeLocations
+    (
+            (20.000   -12.000  -0.300  )
+            (20.000   -8.000   -0.300  )
+            (20.000   -4.000   -0.300  )
+            (20.000   0.000    -0.300  )
+            (20.000   4.000    -0.300  )
+            (20.000   8.000    -0.300  )
+            (20.000   12.000   -0.300  )
+            (35.000   -12.000  -0.300  )
+            (35.000   -8.000   -0.300  )
+            (35.000   -4.000   -0.300  )
+            (35.000   0.000    -0.300  )
+            (35.000   4.000    -0.300  )
+            (35.000   8.000    -0.300  )
+            (35.000   12.000   -0.300  )
+    );
+}
+
+// ===========================================================================
+// 2. Boundary-layer rakes - mode shapes and the PSE baseflow profile
+// ===========================================================================
+// PSE needs two things from the CFD that a wall probe cannot give:
+//   (a) the wall-normal mean profiles u(y), T(y), rho(y) it linearises about
+//   (b) the wall-normal eigenfunction shape, to confirm the disturbance
+//       really is the second mode and not a first-mode or entropy-layer
+//       artefact
+//
+// These rakes provide both. They are sampled at 100 steps (4.5 us, fs =
+// 222 kHz, fN = 111 kHz) rather than 10: that is still above the second-mode
+// frequency at every station aft of x = 3 m, and 8 rakes x 241 points at the
+// 10-step rate would be 1.6e8 samples, which is not a sensible amount of
+// ASCII. Use the wall probes for spectra and these for structure.
+//
+// Each rake is 0.6 m long with 241 points (2.5 mm spacing), which covers the
+// thickest expected boundary layer (201 mm at x = 47 m) plus the entropy
+// layer above it, at roughly 12 points across the thinnest layer sampled
+// (29 mm at x = 1 m). scripts/make_pse_probes.py replaces these straight
+// z-lines with true wall-normal lines and clusters the points near the wall.
+
+pseBLRakes
+{
+    type            sets;
+    libs            (sampling);
+
+    executeControl  timeStep;
+    executeInterval 100;
+    writeControl    timeStep;
+    writeInterval   100;
+
+    setFormat       raw;
+    interpolationScheme cellPoint;
+
+    fields          (p T U rho);
+
+    sets
+    (
+        rake_x1p0
+        {
+            type        uniform;
+            axis        distance;
+            start       (1.000 0.000 -0.020);
+            end         (1.000 0.000 -0.620);
+            nPoints     241;
+        }
+        rake_x3p0
+        {
+            type        uniform;
+            axis        distance;
+            start       (3.000 0.000 -0.020);
+            end         (3.000 0.000 -0.620);
+            nPoints     241;
+        }
+        rake_x6p0
+        {
+            type        uniform;
+            axis        distance;
+            start       (6.000 0.000 -0.020);
+            end         (6.000 0.000 -0.620);
+            nPoints     241;
+        }
+        rake_x10p0
+        {
+            type        uniform;
+            axis        distance;
+            start       (10.000 0.000 -0.020);
+            end         (10.000 0.000 -0.620);
+            nPoints     241;
+        }
+        rake_x16p0
+        {
+            type        uniform;
+            axis        distance;
+            start       (16.000 0.000 -0.020);
+            end         (16.000 0.000 -0.620);
+            nPoints     241;
+        }
+        rake_x24p0
+        {
+            type        uniform;
+            axis        distance;
+            start       (24.000 0.000 -0.020);
+            end         (24.000 0.000 -0.620);
+            nPoints     241;
+        }
+        rake_x34p0
+        {
+            type        uniform;
+            axis        distance;
+            start       (34.000 0.000 -0.020);
+            end         (34.000 0.000 -0.620);
+            nPoints     241;
+        }
+        rake_x44p0
+        {
+            type        uniform;
+            axis        distance;
+            start       (44.000 0.000 -0.020);
+            end         (44.000 0.000 -0.620);
+            nPoints     241;
+        }
+    );
+}
+
+// ***************************************************************************

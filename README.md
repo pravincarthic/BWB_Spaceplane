@@ -4,7 +4,7 @@
 
 This repository contains the computational fluid dynamics (CFD) setup, geometric definition files, solver configurations, and mathematical frameworks for a novel hypersonic spaceplane architecture. The vehicle features a unique design that integrates the **Blended Wing Body (BWB)** configuration with the **flying wing concept**, combining the volumetric efficiency and smooth aerodynamic blending of a BWB with the pure, tailless lifting planform efficiency of a flying wing.
 
-In this architecture, there is no conventional distinction between the aft fuselage and outer wings; the entire aft section functions as a single, continuous lifting wing. This hybrid outer mold line (OML) is augmented with an upstream array of **passive micro-cavities (acoustic metasurfaces)** to damp acoustic instabilities, delay laminar-to-turbulent boundary layer transition, and enhance aerodynamic efficiency during post-reentry atmospheric glide (Mach 8 to Mach 10). Flow modeling is performed using high-fidelity **Large Eddy Simulation (LES)** within OpenFOAM utilizing the **hyStrath** solver suite, specifically **hy2Foam**, parameterized for an 11-species thermo-chemical non-equilibrium air model over a 30 ms physical time horizon.
+In this architecture, there is no conventional distinction between the aft fuselage and outer wings; the entire aft section functions as a single, continuous lifting wing. This hybrid outer mold line (OML) is augmented with an upstream array of **passive micro-cavities (acoustic metasurfaces)** to damp acoustic instabilities, delay laminar-to-turbulent boundary layer transition, and enhance aerodynamic efficiency during post-reentry atmospheric glide (Mach 8 to Mach 10). Flow modeling is performed as **implicit LES (ILES)** in stock **OpenFOAM v2412** using **`rhoCentralFoam`**, with a calorically imperfect frozen-composition air model (`janaf` thermo and `polynomial` transport, both valid to 6000 K) over a 30.375 ms physical time horizon.
 
 ---
 
@@ -41,14 +41,24 @@ In hypersonic boundary layers ($M \ge 4$), the primary mechanism triggering turb
 
 ---
 
-## Computational Fluid Dynamics (CFD) Architecture: OpenFOAM hyStrath
+## Computational Fluid Dynamics (CFD) Architecture: OpenFOAM v2412
 
-All numerical simulations are strictly performed using **OpenFOAM** with the open-source **hyStrath** solver suite, focusing on **`hy2Foam`** for hypersonic reacting flows in thermo-chemical non-equilibrium.
+All numerical simulations are performed using stock **OpenCFD OpenFOAM v2412**
+with **`rhoCentralFoam`**, the density-based central-upwind solver. No custom
+solver or shared library is required.
+
+The configuration previously targeted the hyStrath suite (`hy2Foam`, 11-species
+reacting air, two-temperature non-equilibrium). It was replaced because the
+peak temperature this vehicle actually reaches is 4331 K, below the point where
+dissociation materially changes the aerodynamics of interest, while the caloric
+imperfection and the high-temperature viscosity - which do matter - are
+captured by `janaf` and a fitted `polynomial` transport model. The reasoning is
+set out in `scripts/OpenFOAM configs/hypersonic_case/docs/SETTINGS.md`.
 
 ### Solver Configuration Summary
-* **Simulation Framework:** OpenFOAM (`hyStrath` extension / `hy2Foam`).
-* **Fidelity Level:** Full **Large Eddy Simulation (LES)** resolving unsteady boundary layer turbulence and acoustic micro-vortices without RANS spatial averaging.
-* **Governing Equations:** 3D Compressible Navier-Stokes with 11-species finite-rate chemistry and multi-temperature vibrational/electronic non-equilibrium energy modes.
-* **Convective Flux Discretization:** Kurganov or high-order WENO (5th/7th order) shock-capturing schemes combined with Steger-Warming flux vector splitting for species transport.
+* **Simulation Framework:** OpenFOAM v2412 (`rhoCentralFoam`), 384 MPI ranks, collated I/O.
+* **Fidelity Level:** **Implicit LES (ILES)** on a wall-resolved (y+ below 1) hybrid mesh. `laminar` / `Stokes` stress model: the vanLeer limiters supply the subgrid dissipation, with no explicit SGS model.
+* **Governing Equations:** 3D compressible Navier-Stokes, single static temperature, frozen-composition air. `sensibleInternalEnergy`, `perfectGas`, `janaf` cp(T) and `polynomial` mu(T)/kappa(T) valid 200-6000 K.
+* **Convective Flux Discretization:** `Kurganov` (Kurganov-Noelle-Petrova central-upwind) with `vanLeer` / `vanLeerV` TVD limiters on every reconstruction.
 * **Temporal Integration:** Explicit multi-stage Runge-Kutta (RK3) with adaptive time-stepping bound by $Co \le 0.4$ to resolve micro-cavity acoustic frequencies ($\Delta t \approx 10^{-9}\text{ s}$).
 * **Boundary Layer Mesh Quality:** Unstructured/hybrid prism-hex grids targeting $y^+ < 1$ with a growth rate $\le 1.12$ near wall surfaces and cavity apertures.

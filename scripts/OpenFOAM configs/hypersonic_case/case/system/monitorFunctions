@@ -1,0 +1,231 @@
+// -*- C++ -*- ---------------------------------------------------------------
+// system/monitorFunctions
+//
+// Included from the functions{} block of system/controlDict.
+// NO FoamFile header: every top-level entry in this file becomes a function
+// object.
+//
+// This file does two jobs:
+//   1. run monitoring (Courant number, forces, field extrema, wall heat flux)
+//   2. creation of the derived fields (Ma, magGradRho) that the shock
+//      sampling in system/surfacesShock consumes. Those must exist before
+//      the sampling runs, which is why this file is included first.
+// ---------------------------------------------------------------------------
+
+// ===========================================================================
+// 1. Derived fields
+// ===========================================================================
+
+// Mach number, written as "Ma". Used by the shock surfaces and by ParaView.
+MachNo
+{
+    type            MachNo;
+    libs            (fieldFunctionObjects);
+    executeControl  timeStep;
+    executeInterval 1000;       // matches the surface write cadence
+    writeControl    timeStep;
+    writeInterval   33750;      // stored in the 20 volume writes only
+    result          Ma;
+}
+
+// Density gradient magnitude - the numerical Schlieren field, and the most
+// reliable shock indicator for an isosurface (a pressure isovalue has to be
+// re-tuned whenever the freestream changes; |grad rho| does not).
+gradRho
+{
+    type            grad;
+    libs            (fieldFunctionObjects);
+    field           rho;
+    executeControl  timeStep;
+    executeInterval 1000;
+    writeControl    none;       // the vector field is only an intermediate
+    result          gradRho;
+}
+
+magGradRho
+{
+    type            mag;
+    libs            (fieldFunctionObjects);
+    field           gradRho;
+    executeControl  timeStep;
+    executeInterval 1000;
+    writeControl    timeStep;
+    writeInterval   33750;
+    result          magGradRho;
+}
+
+// ===========================================================================
+// 2. Stability monitoring
+// ===========================================================================
+
+// The step is fixed at 45 ns, so nothing adapts if the Courant number climbs
+// - it just diverges. These two objects are the early-warning system. The
+// design value is Co_max ~ 0.31; if courantMonitor ever logs a max above
+// about 0.6 the run is heading for trouble and deltaT must be reduced.
+CourantNo
+{
+    type            CourantNo;
+    libs            (fieldFunctionObjects);
+    executeControl  timeStep;
+    executeInterval 100;
+    writeControl    timeStep;
+    writeInterval   33750;
+    result          Co;
+}
+
+courantMonitor
+{
+    type            fieldMinMax;
+    libs            (fieldFunctionObjects);
+    mode            magnitude;
+    executeControl  timeStep;
+    executeInterval 100;
+    writeControl    timeStep;
+    writeInterval   100;
+    fields          (Co);
+}
+
+// Field extrema. A negative or NaN pressure/temperature here is the first
+// visible sign of a limiter failure at the shock; T is also the guard on the
+// janaf validity window - if Tmax approaches 6000 K the thermo will abort, so
+// this is what tells you it is coming.
+fieldMinMax
+{
+    type            fieldMinMax;
+    libs            (fieldFunctionObjects);
+    mode            magnitude;
+    executeControl  timeStep;
+    executeInterval 100;
+    writeControl    timeStep;
+    writeInterval   100;
+    fields          (p T U rho);
+}
+
+// ===========================================================================
+// 3. Aerodynamic loads
+// ===========================================================================
+// Stock OpenFOAM forces/forceCoeffs (libforces.so) - the hyStrath
+// libstrathForces.so build is gone along with the rest of that suite.
+//
+// Sampled every 100 steps (4.5 us). That is fast enough to resolve the
+// unsteady buffet content and still only 6,750 rows over the run.
+
+forces
+{
+    type            forces;
+    libs            (forces);
+    executeControl  timeStep;
+    executeInterval 100;
+    writeControl    timeStep;
+    writeInterval   100;
+
+    patches         (Solid_Walls);
+    rho             rhoInf;
+    rhoInf          0.00406992;      // p/(R T) with R = 287.102, T = 250 K
+    CofR            (25.717 0.000 3.022);
+    lRef            48.061;          // measured X extent of the vehicle solid
+    Aref            912.1;           // planform area - confirm against CAD
+}
+
+forceCoeffs
+{
+    type            forceCoeffs;
+    libs            (forces);
+    executeControl  timeStep;
+    executeInterval 100;
+    writeControl    timeStep;
+    writeInterval   100;
+
+    patches         (Solid_Walls);
+    rho             rhoInf;
+    rhoInf          0.00406992;
+    CofR            (25.717 0.000 3.022);
+    lRef            48.061;
+    Aref            912.1;
+
+    magUInf         3169.7;
+    // The -5 deg angle of attack is baked into the meshed geometry, so the
+    // freestream is purely axial and the lift/drag axes stay aligned with
+    // the domain axes. Do NOT rotate these to account for AoA as well.
+    liftDir         (0 0 1);
+    dragDir         (1 0 0);
+    pitchAxis       (0 1 0);
+}
+
+// ===========================================================================
+// 4. Wall thermal loading
+// ===========================================================================
+// Heat flux into the 1500 K isothermal wall. This is the primary TPS sizing
+// output of the run and the main check that the polynomial kappa(T) is doing
+// its job: with a 4331 K stagnation temperature against a 1500 K wall, a
+// Sutherland/constant-Pr model would misreport this by tens of percent.
+wallHeatFlux
+{
+    type            wallHeatFlux;
+    libs            (fieldFunctionObjects);
+    patches         (Solid_Walls);
+    executeControl  timeStep;
+    executeInterval 1000;
+    writeControl    timeStep;
+    writeInterval   33750;
+}
+
+// Wall shear stress and y+ - the evidence that the mesh really is
+// wall-resolved. y+ must stay below 1 over the wetted surface for the
+// boundary-layer profiles the PSE solver consumes to be meaningful.
+wallShearStress
+{
+    type            wallShearStress;
+    libs            (fieldFunctionObjects);
+    patches         (Solid_Walls);
+    executeControl  timeStep;
+    executeInterval 1000;
+    writeControl    timeStep;
+    writeInterval   33750;
+}
+
+yPlus
+{
+    type            yPlus;
+    libs            (fieldFunctionObjects);
+    executeControl  timeStep;
+    executeInterval 1000;
+    writeControl    timeStep;
+    writeInterval   33750;
+}
+
+// ===========================================================================
+// 5. Mean flow for the PSE baseflow
+// ===========================================================================
+// PSE linearises about a steady laminar mean flow. Averaging is started at
+// t = 0.0151875 s (step 337500), i.e. after one full flow-through, so the
+// start-up transient sweeping down the body is excluded and the mean is
+// taken over the second flow-through only.
+//
+// prime2Mean on U and p is kept because the RMS pressure field is what
+// identifies where the second-mode wavepacket is actually growing on the
+// surface - use it to decide whether the probe stations in
+// system/probesPSE are in the right place, and move them if not.
+fieldAverage
+{
+    type            fieldAverage;
+    libs            (fieldFunctionObjects);
+
+    timeStart       0.0151875;
+    restartOnRestart false;
+
+    executeControl  timeStep;
+    executeInterval 10;         // same cadence as the PSE probes
+    writeControl    timeStep;
+    writeInterval   33750;
+
+    fields
+    (
+        U   { mean on; prime2Mean on;  base time; }
+        p   { mean on; prime2Mean on;  base time; }
+        T   { mean on; prime2Mean on;  base time; }
+        rho { mean on; prime2Mean off; base time; }
+    );
+}
+
+// ***************************************************************************

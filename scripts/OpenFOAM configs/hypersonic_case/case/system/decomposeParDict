@@ -1,33 +1,64 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+\*---------------------------------------------------------------------------*/
 FoamFile
 {
     version     2.0;
     format      ascii;
     class       dictionary;
-    note        "Optimized for 31M mesh | Mach 10 Hypersonic | 384 Cores";
+    location    "system";
+    note        "31M cell hybrid mesh | rhoCentralFoam | 384 cores | collated";
     object      decomposeParDict;
 }
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// 1. Total Core Count (Aligned to your 384-core target)
+// ---------------------------------------------------------------------------
+// 384 MPI ranks
+// ---------------------------------------------------------------------------
+// 31M cells / 384 ranks = about 81,000 cells per rank. That is in the healthy
+// band for an explicit density-based solver: enough work per rank to keep the
+// halo exchange from dominating, few enough cells that the 675,000 steps
+// finish in a sensible wall time.
+// ---------------------------------------------------------------------------
 numberOfSubdomains 384;
 
-// 2. Parallel Method
-// ptscotch is perfect for massive unstructured tetrahedral meshes
+// ---------------------------------------------------------------------------
+// ptscotch: graph partitioning on the actual cell connectivity.
+// ---------------------------------------------------------------------------
+// The right choice for this mesh, and specifically better than the geometric
+// hierarchical split that scripts/run.sh used to generate as a fallback. The
+// cell density here varies by more than three orders of magnitude - 0.5 mm
+// cells in the wall-resolved prism layer against metre-scale tets out in the
+// far field - so any decomposition based on the bounding box gives some ranks
+// a handful of huge cells and others a dense block of prisms. ptscotch
+// balances on cell count and minimises the interprocessor face count at the
+// same time, which is what actually determines the parallel efficiency.
+// ---------------------------------------------------------------------------
 method          ptscotch;
 
-// 3. ptscotch Coefficients
 ptscotchCoeffs
 {
-    // No config needed here. Default suffices
+    // Defaults are appropriate. Do not set a strategy string unless a
+    // measured imbalance justifies it.
 }
 
-// 4. Cleaned Constraints for Hypersonic Flow Stability
-constraints
-{
-    // Keeps localized atmosphere patch boundaries on uniform subdomains
-    // to prevent numerical shock reflections and pressure checkerboarding
-    preservePatches
-    {
-        type    preservePatches;
-        patches ( "Atmosphere" );
-    }
-}
+// No constraints block.
+//
+// The previous configuration carried a preservePatches constraint on
+// "Atmosphere" justified as preventing shock reflections and pressure
+// checkerboarding. That reasoning does not hold: preservePatches exists to
+// keep the two halves of a coupled patch (cyclic, cyclicAMI) on the same
+// rank. Atmosphere is an ordinary external boundary with no neighbour, so the
+// constraint had nothing to act on, and in any case domain decomposition is
+// mathematically transparent in OpenFOAM - a processor boundary does not
+// reflect waves or alter the discretisation. Forcing a large far-field patch
+// onto restricted ranks only costs load balance. It has been removed.
+
+// ---------------------------------------------------------------------------
+// This case runs with fileHandler collated (set in system/controlDict).
+// decomposePar must be run with the same handler or the solver will not find
+// the decomposition - scripts/run.sh passes -fileHandler collated explicitly.
+// With collated there is no reconstructPar step at the end of the run.
+// ---------------------------------------------------------------------------
+distributed     no;
+
+// ************************************************************************* //

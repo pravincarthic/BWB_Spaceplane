@@ -1,104 +1,122 @@
-# hy2Foam Case: Mach 10 Spaceplane, 130,000 ft, Implicit LES, 11-Species Real Gas
+# BWB spaceplane - rhoCentralFoam case, OpenFOAM v2412
 
-## What this is
+Mach 9.99 at 130,000 ft over a 48 m blended-wing-body spaceplane at -5 deg
+angle of attack. ILES on a 31M cell wall-resolved hybrid mesh, 384 cores,
+instrumented for second-Mack-mode PSE analysis and for shock-wave
+visualisation in ParaView.
 
-A hy2Foam (hyStrath suite, via https://github.com/ivanZanardi/hypersonicfoam)
-OpenFOAM case for a hypersonic vehicle at Mach 10, 130,000 ft altitude,
--5 deg angle of attack, using:
+Full numbers and their derivations: `docs/PARAMETERS.md`.
+Design rationale: `docs/SETTINGS.md`.
+What to check before trusting a result: `docs/VALIDATION.md`.
 
-- Implicit LES (ILES) only - no explicit subgrid closure
-- KNP (Kurganov-Noelle-Petrova) flux scheme, minMod limiter on U,
-  vanLeer limiter on the remaining files
-- Isothermal wall at 1500 K (good starting guess)
-- 11-species real gas thermochemistry (Park 1993 mechanism), with
-  translational/vibrational temperature non-equilibrium (Tt, Tv)
-- Mesh: hybrid (prism boundary layer + tet core), y<sup>+</sup> < 1
+## What this case is
 
-The actual HypersonicFoam repo was cloned and inspected to build this case,
-so the file structures, dictionary keys, and chemistry/thermo data below are
-checked against the real solver source rather than assumed. See
-`SETTINGS.md` for a full list of corrections made after that check.
-
-## Freestream conditions used
-
-| Quantity | Value |
+| | |
 |---|---|
-| Altitude | 130,000 ft (39.6 km) |
-| Pressure P<sub>inf</sub> | 292.12 Pa |
-| Density rho<sub>inf</sub> | 0.004071 kg/m<sup>3</sup> |
-| Temperature T<sub>inf</sub> (= Tt = Tv) | 249 K |
-| Speed of sound a<sub>inf</sub> | 316.97 m/s |
-| Mach number | 10 |
-| Velocity u<sub>inf</sub> | 3169.7 m/s |
-| Wall temperature | 1500 K (isothermal) |
-| AoA | -5 deg (built into mesh geometry, not the velocity vector) |
+| Solver | `rhoCentralFoam`, stock OpenFOAM v2412 |
+| Thermo | `janaf`, Thigh 6000 K |
+| Transport | `polynomial`, degree 7, valid to 6000 K |
+| Energy | `sensibleInternalEnergy` |
+| Flux scheme | `Kurganov` (KNP) with `vanLeer` limiters |
+| Turbulence | laminar / Stokes - ILES, no explicit SGS model |
+| Timestep | fixed 45 ns, 675,000 steps, CFL 0.37 target |
+| Cores | 384, `ptscotch`, collated output |
 
-Full derivation and rationale in `PARAMETERS.md` and `SETTINGS.md`.
+No hyStrath or hy2Foam component is used. Everything is core OpenFOAM.
 
-## The only placeholder: the mesh
+## Layout
 
-Everything else in this package - chemistry mechanism, species thermo data,
-V-T relaxation model, transport/collision data - is REAL data
-copied verbatim from the hypersonicfoam repo. The only
-placeholder config to edit is:
+```
+case/
+  0/                     p, U, T                (that is all - see below)
+  constant/
+    thermophysicalProperties   janaf + polynomial air, 200-6000 K
+    turbulenceProperties       laminar / Stokes (ILES)
+    polyMesh/                  written by scripts/setup.sh
+  system/
+    controlDict          45 ns fixed step, 675k steps, collated, 20 writes
+    fvSchemes            Kurganov + vanLeer
+    fvSolution           diagonal + smoothSolver diffusion correction
+    decomposeParDict     384 ranks, ptscotch
+    monitorFunctions     derived fields, Courant, forces, heat flux, averages
+    probesPSE            second-mode wall probes and BL rakes
+    surfacesShock        shock isosurfaces and cutting planes for ParaView
+  case.foam              open this in ParaView
+scripts/
+  setup.sh               gmshToFoam, checkMesh, dictionary validation
+  make_pse_probes.py     regenerate probesPSE from the real wall surface
+  run.sh                 decomposePar + mpirun
+  submit_384.slurm       batch submission
+  postProcess.sh         what to open and what to check
+  cleanup.sh             archive a finished run
+docs/
+```
 
-**`scripts/setup.sh`** - `MESH_FILE` variable near the top. Set this to
-the actual path of your `.msh` file, then run `bash scripts/setup.sh`.
+`0/` holds three fields. The previous hy2Foam configuration carried 24 - two
+temperatures plus 11 species plus a vibrational temperature per species - and
+all of those are gone with the two-temperature model.
 
-After conversion, also check `constant/polyMesh/boundary` and confirm the
-patch names match what `case/0/*` boundary conditions assume (`farfield`,
-`wall`, `outlet`) - the repo's own example case uses different names
-(`inlet`, `cylinder`) for its own geometry, so not assuming it matches
-my mesh. 
-
-## Pre-filled configs
-
-- `constant/chemDicts/hTCReactionsEarth93` - real Park (1993) 11-species
-  air reaction mechanism, copied from the repo's (HypersonicFoam) `genericCase` example
-- `constant/thermoDEM` - real per-species thermodynamic data
-- `constant/thermo2TModel` - real Millikan-White/Park V-T relaxation model
-- `constant/hTCProperties`, `constant/chemistryProperties` - real config,
-  copied from the repo
-- `constant/transportProperties` - real Gupta/Yos/Thompson 11-species
-  collision-integral data (rarefaction diagnostics turned off since this
-  is dense continuum flow, not the near-continuum-breakdown regime those
-  diagnostics target)
-- `constant/thermophysicalProperties` references all of the above via
-  `$FOAM_CASE`-relative paths for portability
-
-## Running
+## Workflow
 
 ```bash
-bash scripts/setup.sh
-bash scripts/run.sh 8       # 8 MPI ranks, change to number of cores desired. If using a manager such as SLURM, ensure enough cores are requested first
+source /opt/openfoam2412/etc/bashrc        # site-specific
+
+export MESH_FILE=/path/to/your.msh
+bash scripts/setup.sh                      # convert, check, validate
+
+python3 scripts/make_pse_probes.py         # exact probe placement (recommended)
+
+bash scripts/run.sh 384                    # or: sbatch scripts/submit_384.slurm
 bash scripts/postProcess.sh
 ```
 
-## Package contents
+`scripts/setup.sh` prints the mesh patch names. They must be `Inlet`,
+`Outlet`, `Atmosphere` and `Solid_Walls` - those names appear in `0/*` and in
+every function object.
 
-```
-case/0/            Initial conditions (U, p, Tt, Tv, 11 species Y fields)
-case/constant/      transportProperties, thermophysicalProperties,
-                    chemistryProperties, hTCProperties, thermoDEM,
-                    thermo2TModel, chemDicts/hTCReactionsEarth93,
-                    turbulenceProperties, polyMesh/ (empty - see above)
-case/system/        controlDict, fvSchemes, fvSolution
-scripts/            setup.sh, run.sh, postProcess.sh, cleanup.sh
-docs/               this file, PARAMETERS.md, SETTINGS.md, VALIDATION.md
-logs/               run logs written here by run.sh
-```
+## Two things to check before the production run
 
-## Important caveats
+**1. The minimum cell size.** The timestep is fixed, so nothing adapts if the
+Courant number climbs. CFL 0.37 at 45 ns requires the smallest cell in the
+domain to be at least 0.424 mm. The mesh generator floor is 0.5 mm, giving
+Co = 0.314. `scripts/setup.sh` prints this check against the `checkMesh`
+output; if any cell is smaller, reduce `deltaT` in `system/controlDict`.
 
-- Boundary patch names (`farfield`, `wall`, `outlet`) are placeholders -
-  rename actual actual mesh. In my case the elements are `Inlet`, `Outlet`, `Atmosphere`, `Walls`
-- `endTime` in `controlDict` is a judgment call (e.g. 0.02 s) - I set
-  it as 0.03 sec based on my vehicle's reference length and desired flow-through
-  time.
-- Mesh classification (hybrid, y+ < 1) and complexity level (complex,
-  leaning down from "complex/extreme") were set based judgement
-  of a "smooth spaceplane" body - see `SETTINGS.md` for the reasoning.
-- This case targets OpenFOAM v1706, which is what hyStrath (and therefore
-  hy2Foam) is built against per the repo's own README - `fvConstraints`
-  (introduced later, ~v1812) is intentionally not used here since this
-  solver predates it.
+**2. The probe locations.** The coordinates shipped in `system/probesPSE`
+are derived from the vehicle bounding box and rely on `patchProbes` snapping
+to the nearest wall face. Run `scripts/make_pse_probes.py` once the mesh
+exists to replace them with exact on-surface points and true wall-normal
+rakes.
+
+## Output
+
+| Where | What | Cadence |
+|---|---|---|
+| time directories | full volume fields | 20 over the run |
+| `postProcessing/shockSurfaces/` | shock isosurfaces, cutting planes (`.vtp`) | every 1000 steps |
+| `postProcessing/wallSurface/` | surface p, heat flux, shear (`.vtp`) | every 1000 steps |
+| `postProcessing/pseWall*/` | wall p, T, U, rho time series | every 10 steps |
+| `postProcessing/pseBLRakes/` | wall-normal profiles | every 100 steps |
+| `postProcessing/force*/` | loads and coefficients | every 100 steps |
+| `postProcessing/courantMonitor/` | max Courant number | every 100 steps |
+
+Open `case/case.foam` in ParaView for the volume fields; open the `.vtp`
+series directly for the shock animation. Nothing needs `reconstructPar`.
+
+## What changed from the previous configuration
+
+This case previously targeted `hy2Foam` from the hyStrath suite: an
+11-species reacting air model with a two-temperature (translational plus
+vibrational) formulation, Blottner-Eucken transport, Park 1993 chemistry, and
+three custom shared libraries.
+
+It now targets stock `rhoCentralFoam`. Files removed:
+`constant/transportProperties`, `constant/chemistryProperties`,
+`constant/thermoDEM`, `constant/thermo2TModel`, `constant/hTCProperties`,
+`constant/chemDicts/`, and 22 of the 24 fields in `0/`.
+
+The physical justification for dropping the reacting two-temperature model is
+in `docs/SETTINGS.md`: the peak temperature this case actually reaches is
+4331 K, below the point where air dissociation materially changes the
+aerodynamics, and a frozen-composition calorically imperfect gas captures the
+cp(T) and mu(T) variation that does matter.

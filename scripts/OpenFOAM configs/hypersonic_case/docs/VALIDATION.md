@@ -1,97 +1,166 @@
-# Validation Checklist
+# Validation
 
-## 1. Mesh conversion (before running the solver)
+What to check, in order, and what the answer should be. Anything marked
+ESTIMATE is a value derived here rather than measured, and should be replaced
+by the run's own number once available.
 
-- `gmshToFoam` completed without errors (check `scripts/setup.sh` output)
-- `checkMesh -allTopology -allGeometry` reports no topology errors and
-  acceptable non-orthogonality/skewness for LES (non-orthogonality
-  ideally below ~65 deg, skewness below ~4 for stable LES)
-- Boundary patch names in `constant/polyMesh/boundary` match the names
-  used in `case/0/*` (`farfield`, `wall`, `outlet`) - see README
-  placeholder note if they don't. The repo's own `genericCase` example
-  uses different names (`inlet`, `cylinder`) for its own geometry, so
-  don't assume ours match yours either.
+## Before the first step
 
-## 2. Species conservation
+**Patch names.** `scripts/setup.sh` prints them. They must be exactly
+`Inlet`, `Outlet`, `Atmosphere`, `Solid_Walls`. Every field file and every
+function object refers to those names.
 
-- sum(Y_i) = 1.0 at every cell, every timestep (mass fraction
-  conservation) - check explicitly in post-processing, nothing in this
-  case enforces it as a hard constraint at the solver level
-- Freestream species (far from the body) should remain at Y_N2=0.767,
-  Y_O2=0.233 with all others near zero - if freestream cells show
-  significant dissociation, something is wrong with boundary conditions
-  or chemistry activation
+**Minimum cell size.** From `checkMesh`. The fixed 45 ns step needs every
+cell to be at least 0.424 mm for the 0.37 CFL target. The mesh generator
+floor is 0.5 mm. If `checkMesh` reports smaller, reduce `deltaT` - nothing in
+the case will catch it at runtime.
 
-## 3. Shock structure (Tt, Tv)
+**Mesh quality.** `checkMesh -allTopology -allGeometry` must pass. Watch max
+non-orthogonality (below 70 is comfortable for the `corrected` schemes) and
+max skewness (below 4).
 
-- Tt should rise sharply across the bow shock, consistent with roughly
-  the ~5000 K normal-shock estimate in `PARAMETERS.md` (oblique shock
-  angle at -5 deg AoA will change the exact value - the normal-shock
-  number is a sanity-check order of magnitude, not a target)
-- Tv should visibly lag Tt immediately behind the shock, then relax
-  toward Tt further downstream (V-T relaxation, `constant/thermo2TModel`,
-  MillikanWhitePark model) - if Tv jumps to match Tt instantly,
-  relaxation is not being resolved (check grid resolution in the shock-
-  normal direction)
-- Density should show a clear jump from rho_inf = 0.004071 kg/m^3 to a
-  higher post-shock value
+**Dictionaries parse.** `scripts/setup.sh` runs `foamDictionary -expand` on
+each one. The `-expand` matters: it is what resolves the three `#include`
+directives in `controlDict`.
 
-## 4. Dissociation front
+**Probe placement.** Run `scripts/make_pse_probes.py` and read its output.
+It reports how many stations it could place and names any it could not. A
+station it could not place is one where the bounding-box assumption was
+wrong, which is exactly what it exists to find.
 
-- Y_N2, Y_O2 should decrease behind the shock; Y_N, Y_O should increase
-  correspondingly
-- The dissociation front should track with the Tv field (Tv-controlled
-  rate via the ParkTTv vibration-chemistry coupling in
-  `constant/chemistryProperties`), not instantaneously with Tt
+## First 1000 steps
 
-## 5. Ionization (sanity check, not expected to be large)
+**Courant number.** `postProcessing/courantMonitor/`. Expect a maximum near
+0.31. Anything above about 0.6 means the run is heading for divergence and
+`deltaT` must be reduced; the step is fixed, so nothing will adapt.
 
-- Y_N2+, Y_O2+, Y_NO+, Y_N+, Y_O+, Y_e- should remain small through most
-  of the domain, consistent with the ~5000 K post-shock estimate being
-  below typical strong-ionization onset (~8000-10000 K)
-- If ion/electron mass fractions are unexpectedly large somewhere, check
-  local Tt in that region before assuming a chemistry bug
+**Temperature bounds.** `postProcessing/fieldMinMax/`. `T` must stay inside
+`[200, 6000]` K or janaf aborts. Expect the maximum to climb towards 4331 K
+as the bow shock forms. A maximum approaching 6000 K is the warning that the
+janaf ceiling is about to be hit.
 
-## 6. ILES-specific checks (no explicit SGS model)
+**Pressure positivity.** From the same file. A negative `p` means the vanLeer
+limiter has failed somewhere, almost always at a sharp leading edge on a
+skewed cell.
 
-- `constant/turbulenceProperties` is `simulationType laminar;` - there is
-  no eddy-viscosity term added anywhere. Resolved turbulent kinetic energy
-  should not artificially collapse to near-zero away from walls/shocks -
-  if it does, the KNP+Minmod/vanLeer scheme combination in
-  `system/fvSchemes` is
-  too dissipative for this mesh resolution and a less diffusive limiter
-  should be tried
-- Conversely, unphysical oscillations near the bow shock or any shock-
-  shock interaction region point the other way - under-dissipative for
-  this mesh/flow combination
-- Since there is no SGS coefficient to tune (correction #4 in
-  `SETTINGS.md`), the flux/limiter choice in `fvSchemes` is the only knob
-  available for either direction
+**No solver divergence.** The `e` and `U` diffusion solves should converge in
+a handful of sweeps. Rising iteration counts mean the diffusive stability
+limit is being approached, which at a fixed step means the same remedy.
 
-## 7. Wall boundary (isothermal, 1500 K)
+## Physics checks against the predicted values
 
-- Confirm `Tt` and `Tv` both reach ~1500 K at the wall in the converged
-  solution (fixedValue BC) - if the near-wall solution asymptotes to a
-  different value, check for BC application issues at the actual
-  converted-mesh wall patch name
+These are the numbers to compare the run against. All are ESTIMATES computed
+from the thermally perfect janaf gas at frozen composition
+(`docs/PARAMETERS.md` has the working).
 
-## 8. Solver convergence
+| Quantity | Predicted | Where to read it |
+|---|---|---|
+| Post-shock `T2` | 4256 K | stagnation streamline, symmetry plane |
+| Stagnation `T0` | 4331 K | `fieldMinMax` maximum of `T` |
+| Post-shock `p2` | 35,445 Pa | `fieldMinMax` maximum of `p` |
+| `p2/p1` | 121.3 | - |
+| `rho2/rho1` | 7.13 | - |
+| Post-shock `u2` | 445 m/s | symmetry plane |
 
-- Chemistry solver (`chemistryType.chemistrySolver Euler2Implicit` in
-  `constant/chemistryProperties`) should not be repeatedly failing/
-  retrying - if it is, `initialChemicalTimeStep` (currently 1e-9 s) may
-  need adjustment
-- `Yi` solver (PBiCG/DILU, tolerance 1e-12) residuals should trend down,
-  not plateau or diverge
-- `maxCo = 0.5` in `controlDict` is a conservative starting point given
-  the complex/extreme flow assumption - if the run is stable, you may be
-  able to increase it for faster wall-clock turnaround
+The run should come out **below** the predicted `T0`, not above. Real air at
+4331 K has some O2 dissociation absorbing energy that this frozen gas cannot;
+the frozen model is the conservative-high case for temperature. A run that
+exceeds 4331 K anywhere other than a transient start-up spike indicates a
+numerical problem, not physics.
 
-## 9. Package/reproducibility
+**Shock stand-off.** Compare the `shockIsoP_mid` isosurface at the nose
+against a Billig correlation for the nose radius. Agreement within 10-20
+percent is the expectation for a blunt body at this Mach number; a large
+discrepancy usually means the mesh is too coarse where the shock sits, not
+that the physics is wrong.
 
-- Confirm you edited `MESH_FILE` in `scripts/setup.sh` before running -
-  it is the only remaining placeholder in this package (chemistry/thermo
-  data is real, copied from the repo, not a placeholder - see README)
-- Record your actual `endTime` and reference length `L` (used for
-  Reynolds number) once determined - both were left as placeholders in
-  this package (see README)
+**Shock thickness.** The KNP scheme should smear the shock over 3 to 5 cells.
+Measure it on `planeSymmetryY0`. Substantially more than that means the
+limiter is being triggered too broadly.
+
+## Boundary layer
+
+**y+ below 1.** `postProcessing/yPlus/`, over `Solid_Walls`. This is the
+condition that makes the case wall-resolved and it is what the PSE profiles
+depend on. Regions above 1 are regions where the stability analysis is not
+trustworthy.
+
+**Boundary-layer thickness.** From `postProcessing/pseBLRakes/`. Compare
+against the Eckert reference-temperature prediction:
+
+| x [m] | delta predicted [mm] |
+|---|---|
+| 1.0 | 29.4 |
+| 3.0 | 50.9 |
+| 10.0 | 92.9 |
+| 24.0 | 143.9 |
+| 47.0 | 201.3 |
+
+These are flat-plate estimates on a three-dimensional body, so agreement to
+within a factor of about 1.5 is what to expect. Use the measured values, not
+these, to re-target the PSE frequency band.
+
+**Rake coverage.** Each rake is 0.6 m long. Confirm the profile actually
+reaches the freestream at every station - if the measured delta at x = 47 m
+is much larger than 201 mm the rakes are too short and
+`--rake-length` in `scripts/make_pse_probes.py` needs raising.
+
+**Wall heat flux.** `postProcessing/wallHeatFlux/`. The peak is at the nose.
+This is the primary TPS output and it is the check that the polynomial
+kappa(T) is doing its job - a Sutherland model would report this tens of
+percent low.
+
+## Second Mack mode
+
+**Spectra.** FFT the wall pressure from `postProcessing/pseWallWindward/`.
+Expect a distinct narrow peak that shifts to lower frequency going aft,
+tracking the table in `docs/PARAMETERS.md` (about 54 kHz at x = 1 m falling
+to about 8 kHz at x = 47 m). A peak that does not shift with x is not the
+second mode.
+
+**Amplitude growth.** The peak amplitude should grow exponentially with x
+over the unstable region. That growth rate is what the PSE N-factor is
+compared against.
+
+**Mode shape.** From the rakes at the same station: the second mode has a
+characteristic wall-pressure maximum with a phase reversal across the
+critical layer. If the eigenfunction does not show that structure, the peak
+is something else - a first mode, an entropy-layer disturbance, or numerical
+noise.
+
+**Two-dimensionality.** Compare phase across `pseWallSpanwise` at x = 20 m
+and x = 35 m. If it is coherent across the span, `beta = 0` in the PSE
+configuration is justified. If not, `n_beta` must be opened up.
+
+**Noise floor.** Confirm the broadband floor in the spectrum sits well below
+the peak. If it does not, the disturbance is not resolved above the numerical
+noise and the run needs a finer mesh, not more time.
+
+## Loads
+
+`postProcessing/forceCoeffs/`. Cd and Cl should settle after roughly one
+flow-through (0.0152 s, step 337,500). If they are still drifting at the end
+of the run, the run is too short for the loads to be meaningful, whatever the
+stability results show.
+
+`Aref` is 912.1 m2 and is flagged in `PARAMETERS.md` as needing confirmation
+against CAD - every coefficient scales directly with it.
+
+## Known limitations of this case
+
+Stated plainly so they are not discovered later:
+
+- **Frozen composition.** No dissociation. The stagnation region is the one
+  place where this is a real approximation, and it makes the predicted
+  temperature there too high. Do not use this case as the source for a
+  stagnation-point heating number.
+- **2.0 flow-throughs.** Enough to establish the flow and to give a long
+  probe record, not enough for converged turbulence statistics. The
+  `fieldAverage` output is a laminar mean baseflow for PSE.
+- **Transition is not modelled.** This is a laminar ILES. It computes the
+  baseflow and resolves the disturbance; it does not predict where transition
+  occurs. That is what the PSE N-factor is for.
+- **Shock isosurface thresholds are estimates.** The `|grad rho|` values of
+  5.0 and 1.0 kg/m4 come from the normal-shock density jump, not from a
+  measurement. Retune them on the first written frame.
+- **`Aref` is unconfirmed.** See above.

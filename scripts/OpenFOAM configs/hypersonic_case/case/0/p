@@ -9,7 +9,13 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// Freestream static pressure at 130,000 ft (user-supplied, same as ISA table)
+// Freestream static pressure at 130,000 ft (user-supplied, same as ISA table).
+//
+// rhoCentralFoam solves for absolute static pressure in Pa - dimensions
+// [1 -1 -2 0 0 0 0], NOT the kinematic p/rho used by the incompressible
+// solvers. With T = 250 K and R = 287.102 J/kg/K (molWeight 28.95999) this
+// gives rho_inf = 0.00406992 kg/m3.
+
 dimensions      [1 -1 -2 0 0 0 0];
 
 internalField   uniform 292.12;
@@ -20,12 +26,14 @@ boundaryField
     {
         type            freestreamPressure;
         freestreamValue uniform 292.12;
+        value           uniform 292.12;
     }
 
     Atmosphere
     {
         type            freestreamPressure;
         freestreamValue uniform 292.12;
+        value           uniform 292.12;
     }
 
     Solid_Walls
@@ -35,6 +43,10 @@ boundaryField
 
     Outlet
     {
+        // Non-reflecting outflow. psi is registered as "thermo:psi" by
+        // hePsiThermo in v2412. gamma is the advective wave speed exponent
+        // only - 1.4 matches the janaf value at the 250 K far-field state
+        // (1.4035), which is where this boundary sits.
         type            waveTransmissive;
         field           p;
         psi             thermo:psi;

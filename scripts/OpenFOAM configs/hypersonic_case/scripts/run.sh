@@ -1,134 +1,76 @@
 #!/bin/bash
-# run.sh - MPI execution wrapper for hy2Foam
+# ============================================================================
+# run.sh - decompose and run rhoCentralFoam
 #
-# Usage: bash scripts/run.sh [num_ranks]
-# Default num_ranks = 8 if not given.
+# Usage: bash scripts/run.sh [num_ranks]        (default 384)
+#
+# Collated output is used throughout (fileHandler collated, set in
+# case/system/controlDict). Every parallel step must agree on that setting,
+# so -fileHandler collated is passed explicitly here as well.
+#
+# There is deliberately NO reconstructPar at the end. With collated output the
+# time directories are already single files that ParaView reads directly
+# through case/case.foam - reconstructing a 31M cell case 20 times would cost
+# hours and produce nothing new.
+# ============================================================================
 
-set -e
+set -euo pipefail
 
-NP="${1:-8}"
-CASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../case" && pwd)"
-LOG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../logs" && pwd)"
-
-# --------------------------------------------------------------------------
-# Extents used to drive the hierarchical decomposition below.
-#
-# These are the SPACEPLANE's own bounding box, not the outer farfield
-# domain box. The farfield box (200 m cube) is just the artificial
-# empty far-field cage the simulation runs inside - the mesh is almost
-# entirely coarse and near-uniform out there, so its shape tells you
-# nothing about how the actual mesh (and therefore load) is distributed.
-# The cells that matter are clustered tightly around the vehicle.
-#
-# Measured from Geometry_precut_AoA_neg5_20260822.step (the vehicle
-# solid, kept in the file as a reference body alongside the pre-cut
-# domain):
-#   X:  0.057 m to  49.643 m  (Lx = 49.585 m)  - nose to tail
-#   Y: -22.459 m to 14.213 m  (Ly = 36.672 m)  - spanwise
-#   Z: -0.022 m to  2.600 m   (Lz =  2.622 m)  - thickness
-#
-# Note: this case uses a y+<1 wall-resolved mesh (prism layers stacked
-# in the thickness/wall-normal direction - see SETTINGS.md). Because Lz
-# is so much smaller than Lx/Ly, the balanced-edge-length search below
-# naturally comes out to nz=1 for realistic rank counts - i.e. it never
-# places a decomposition boundary through the thin near-wall boundary
-# layer stack. That is the physically correct behavior here, not a
-# degenerate result: splitting through a wall-resolved viscous layer
-# adds interprocessor communication exactly where the mesh is stiffest
-# and finest, so leaving it whole and instead parallelizing across the
-# streamwise (X, wake/shock direction) and spanwise (Y) extents - where
-# the geometry and flow actually have room to spread across ranks - is
-# the standard approach.
-#
-# If you re-derive the geometry, recompute LX/LY/LZ with a CAD kernel
-# (e.g. cadquery: shape.BoundingBox() on the vehicle solid, not the
-# domain solid) and update below. Once you have the actual generated
-# mesh (after scripts/setup.sh), it's worth confirming real per-rank
-# cell counts with `checkMesh -allTopology` or by inspecting
-# processor*/constant/polyMesh cell counts after decomposePar, since
-# this bounding-box weighting is still a geometric proxy, not a measure
-# of actual cell density - the real mesh may cluster cells (bow shock,
-# wake refinement) in ways this can't see.
-# --------------------------------------------------------------------------
-LX=49.585
-LY=36.672
-LZ=2.622
+NP="${1:-384}"
+PKG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CASE_DIR="$PKG_DIR/case"
+LOG_DIR="$PKG_DIR/logs"
+mkdir -p "$LOG_DIR"
 
 cd "$CASE_DIR"
 
-if [ ! -d "constant/polyMesh" ] || [ ! -f "constant/polyMesh/owner" ]; then
-    echo "ERROR: no converted mesh found in constant/polyMesh/"
-    echo "Run bash scripts/setup.sh first."
+if [ ! -f constant/polyMesh/owner ]; then
+    echo "ERROR: no converted mesh in constant/polyMesh/. Run scripts/setup.sh first."
     exit 1
 fi
 
-if [ "$NP" -gt 1 ]; then
-    if [ ! -f "system/decomposeParDict" ]; then
-        echo "NOTE: no system/decomposeParDict found."
-        echo "Generating a hierarchical decomposition for $NP ranks."
-
-        # Factor NP into three integers (nx ny nz) with nx*ny*nz = NP,
-        # choosing the triple that keeps each subdomain's edge length
-        # (Lx/nx, Ly/ny, Lz/nz) as close to equal as possible - i.e. the
-        # split is weighted by the vehicle's own proportions (LX/LY/LZ
-        # above), not the outer farfield box. For this vehicle (thin,
-        # elongated, wall-resolved in Z) that means nz stays at 1 for
-        # realistic rank counts and splitting happens in X/Y instead -
-        # see the note above on why that's the physically correct call.
-        read NX NY NZ <<< "$(awk -v np="$NP" -v lx="$LX" -v ly="$LY" -v lz="$LZ" '
-            BEGIN {
-                best_cost = -1
-                for (a = 1; a <= np; a++) {
-                    if (np % a != 0) continue
-                    rem = np / a
-                    for (b = 1; b <= rem; b++) {
-                        if (rem % b != 0) continue
-                        c = rem / b
-                        sx = lx / a; sy = ly / b; sz = lz / c
-                        mean = (sx + sy + sz) / 3
-                        cost = (sx - mean)^2 + (sy - mean)^2 + (sz - mean)^2
-                        if (best_cost < 0 || cost < best_cost) {
-                            best_cost = cost; bnx = a; bny = b; bnz = c
-                        }
-                    }
-                }
-                print bnx, bny, bnz
-            }
-        ')"
-        echo "hierarchical split (from vehicle bbox ${LX}x${LY}x${LZ} m): nx=$NX ny=$NY nz=$NZ (nx*ny*nz=$NP)"
-
-        cat > system/decomposeParDict << EOF
-FoamFile
-{
-    version     2.0;
-    format      ascii;
-    class       dictionary;
-    object      decomposeParDict;
-}
-numberOfSubdomains  $NP;
-method              hierarchical;
-
-hierarchicalCoeffs
-{
-    n           ($NX $NY $NZ);
-    delta       0.001;
-    order       xyz;
-}
-EOF
-    fi
-    echo "Decomposing case for $NP ranks"
-    decomposePar -force
-
-    echo "Running hy2Foam in parallel on $NP ranks"
-    LOG_FILE="$LOG_DIR/hy2Foam_run_$(date +%Y%m%d_%H%M%S).log"
-    mpirun -np "$NP" hy2Foam -parallel | tee "$LOG_FILE"
-
-    echo "Reconstructing decomposed case"
-    reconstructPar
-else
-    echo "Running hy2Foam in serial"
-    LOG_FILE="$LOG_DIR/hy2Foam_run_$(date +%Y%m%d_%H%M%S).log"
-    hy2Foam | tee "$LOG_FILE"
+DECOMP_N="$(foamDictionary -entry numberOfSubdomains -value system/decomposeParDict)"
+if [ "$DECOMP_N" != "$NP" ]; then
+    echo "ERROR: requested $NP ranks but system/decomposeParDict says $DECOMP_N."
+    echo "Edit numberOfSubdomains in that file, or run with: bash scripts/run.sh $DECOMP_N"
+    echo "The decomposition is not regenerated automatically - ptscotch on a"
+    echo "31M cell mesh is a deliberate, reproducible choice and silently"
+    echo "swapping it for a geometric split would change the load balance."
+    exit 1
 fi
 
-echo "Run complete. Log written to: $LOG_FILE"
+STAMP="$(date +%Y%m%d_%H%M%S)"
+
+if [ "$NP" -gt 1 ]; then
+    if [ ! -d processor0 ] && [ ! -d processors"$NP" ]; then
+        echo "Decomposing for $NP ranks (ptscotch, collated)"
+        decomposePar -force -fileHandler collated 2>&1 | tee "$LOG_DIR/decomposePar_$STAMP.log"
+    else
+        echo "Existing decomposition found, reusing it."
+        echo "Delete processors$NP/ (or processor*/) to force a fresh decomposePar."
+    fi
+
+    echo ""
+    echo "Running rhoCentralFoam on $NP ranks"
+    echo "  675,000 fixed steps of 45 ns, endTime 0.030375 s"
+    echo "  20 volume writes, 675 surface frames, probes every 10 steps"
+    LOG_FILE="$LOG_DIR/rhoCentralFoam_$STAMP.log"
+    mpirun -np "$NP" rhoCentralFoam -parallel -fileHandler collated \
+        2>&1 | tee "$LOG_FILE"
+else
+    echo "Running rhoCentralFoam in serial (this is a 31M cell case - expect"
+    echo "this to be useful only for a smoke test on a cut-down mesh)"
+    LOG_FILE="$LOG_DIR/rhoCentralFoam_$STAMP.log"
+    rhoCentralFoam 2>&1 | tee "$LOG_FILE"
+fi
+
+echo ""
+echo "Run finished. Log: $LOG_FILE"
+echo ""
+echo "Check the Courant monitor before trusting the result - the timestep is"
+echo "fixed, so nothing adapted if it drifted up:"
+echo "    grep -A2 'fieldMinMax courantMonitor' \"$LOG_FILE\" | grep max | tail"
+echo "Design value is about 0.31. Anything approaching 1 means the run is"
+echo "unstable and deltaT must be reduced."
+echo ""
+echo "Next: bash scripts/postProcess.sh"
