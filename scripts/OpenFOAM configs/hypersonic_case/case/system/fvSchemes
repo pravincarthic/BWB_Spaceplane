@@ -1,4 +1,5 @@
 /*--------------------------------*- C++ -*----------------------------------*\
+\*---------------------------------------------------------------------------*/
 FoamFile
 {
     version     2.0;
@@ -15,7 +16,7 @@ FoamFile
 // Checked against hyStrath/applications/solvers/compressible/hy2Foam/numerics/fluxesCalculation.H and numerics/KNP-KT.H: the valid fluxScheme string values are Kurganov, Tadmor, ROE, KFVS, LxF - there is no literal
 // "KNP" string. "Kurganov" IS the Kurganov-Noelle-Petrova (KNP) central- upwind scheme (confirmed directly in KNP-KT.H: "a_pos = ap/(ap - am); //- Eq.9 KNP").
 // Every reconstructed/limited field (U, rho, T, species) uses vanLeer.
-// No explicit SGS term is added anywhere in this file (see constant/turbulenceProperties: simulationType laminar, laminarModel Stokes) - the limiters below are deliberately the ONLY numerical
+// No explicit SGS term is added anywhere in this file (see constant/turbulenceProperties: simulationType laminar, model Stokes) - the limiters below are deliberately the ONLY numerical
 // dissipation mechanism besides real molecular transport. That is what makes this a pure ILES run.
 // ============================================================================
 
