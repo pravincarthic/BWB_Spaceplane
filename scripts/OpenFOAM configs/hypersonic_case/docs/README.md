@@ -74,7 +74,7 @@ bash scripts/postProcess.sh
 `Outlet`, `Atmosphere` and `Solid_Walls` - those names appear in `0/*` and in
 every function object.
 
-## Two things to check before the production run
+## Three things to check before the production run
 
 **1. The minimum cell size.** The timestep is fixed, so nothing adapts if the
 Courant number climbs. CFL 0.37 at 45 ns requires the smallest cell in the
@@ -82,7 +82,15 @@ domain to be at least 0.424 mm. The mesh generator floor is 0.5 mm, giving
 Co = 0.314. `scripts/setup.sh` prints this check against the `checkMesh`
 output; if any cell is smaller, reduce `deltaT` in `system/controlDict`.
 
-**2. The probe locations.** The coordinates shipped in `system/probesPSE`
+**2. The mesh units.** The `.msh` from `scripts/final_meshing.py` is in
+**millimetres** - it scales the STEP geometry by 1000 so the Gmsh sizing
+constants can be written in mm. The OpenFOAM case is in metres, so the
+conversion must run as `gmshToFoam -scale 0.001`, which `scripts/setup.sh`
+does by default. Get this wrong and the solver runs without complaint on a
+48 km vehicle. `setup.sh` step 3a and `make_pse_probes.py` both abort if the
+converted mesh is not metre-scale.
+
+**3. The probe locations.** The coordinates shipped in `system/probesPSE`
 are derived from the vehicle bounding box and rely on `patchProbes` snapping
 to the nearest wall face. Run `scripts/make_pse_probes.py` once the mesh
 exists to replace them with exact on-surface points and true wall-normal

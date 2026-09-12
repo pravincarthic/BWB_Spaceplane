@@ -1,5 +1,33 @@
 # Parameters
 
+## Units
+
+**The OpenFOAM case is entirely in SI: metres, seconds, kilograms, kelvin,
+pascals.** Every coordinate below - probe stations, rake lengths, cutting
+plane bounds, `CofR`, `lRef`, `Aref` - is in metres.
+
+The mesh is not. `scripts/final_meshing.py` scales the STEP geometry by 1000
+so that the sizing constants in `scripts/gmsh_config.json` (`size_near` 0.5,
+`dist_max` 25000, `far_field_length_mm` 200000) can be written in
+millimetres, so the `.msh` it writes is in **millimetres**.
+
+`gmshToFoam` does not rescale on its own. The conversion must therefore be
+run as `gmshToFoam <mesh> -scale 0.001`, which `scripts/setup.sh` does by
+default (`MESH_SCALE`). Two guards exist because getting this wrong is silent
+- the solver runs happily on a 48 km vehicle:
+
+- `scripts/setup.sh` step 3a parses the `checkMesh` bounding box and aborts if
+  the largest coordinate exceeds 1000 (metres would give about 100)
+- `scripts/make_pse_probes.py` measures the wall surface and refuses to write
+  probes if the vehicle is not about 48 m long
+
+| Reads as | In metres | In the mm mesh |
+|---|---|---|
+| Vehicle length | 48.061 | 48061 |
+| Far-field box | 200 | 200000 |
+| Minimum cell | 5.0e-4 | 0.5 |
+| First rake point | 2.0e-5 | 0.02 |
+
 Every number this case runs on, with the working behind it. Cross-check
 against the dictionaries; if the two disagree, the dictionary is what runs.
 

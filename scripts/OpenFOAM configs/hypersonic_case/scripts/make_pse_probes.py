@@ -211,11 +211,43 @@ def fmt_pts(points, indent=12):
                      for p in points)
 
 
-def build(facets, stations, rake_length, x_tol):
+# The vehicle is 48.061 m long as meshed. Anything much larger means the
+# polyMesh is still in the millimetres that scripts/final_meshing.py works in,
+# because gmshToFoam was run without -scale 0.001.
+EXPECTED_LENGTH_M = 48.061
+
+
+def check_units(facets):
     xmin = min(c[0] for c, _, _ in facets)
     xmax = max(c[0] for c, _, _ in facets)
-    print("wall surface: %d facets, x from %.3f to %.3f m"
-          % (len(facets), xmin, xmax))
+    length = xmax - xmin
+    if length < 10.0 * EXPECTED_LENGTH_M:
+        return xmin, xmax
+    raise SystemExit(
+        "\nERROR: this wall surface is not in metres.\n"
+        "  measured vehicle length: %.1f\n"
+        "  expected:                %.3f m\n"
+        "  ratio:                   %.0f\n\n"
+        "The mesh was almost certainly converted without the millimetre to\n"
+        "metre scaling. scripts/final_meshing.py scales the STEP geometry by\n"
+        "1000 so the sizing constants in scripts/gmsh_config.json can be\n"
+        "written in mm, so the .msh it writes is in millimetres, and\n"
+        "gmshToFoam does not rescale on its own.\n\n"
+        "Refusing to write probe coordinates: every station, rake length and\n"
+        "cutting-plane bound in this case is in metres, and so are CofR,\n"
+        "lRef and Aref. Generating millimetre probes would hide the problem\n"
+        "rather than fix it.\n\n"
+        "Fix the conversion instead:\n"
+        "    rm -rf case/constant/polyMesh\n"
+        "    MESH_SCALE=0.001 bash scripts/setup.sh\n"
+        % (length, EXPECTED_LENGTH_M, length / EXPECTED_LENGTH_M)
+    )
+
+
+def build(facets, stations, rake_length, x_tol):
+    xmin, xmax = check_units(facets)
+    print("wall surface: %d facets, x from %.3f to %.3f m (length %.3f m)"
+          % (len(facets), xmin, xmax, xmax - xmin))
 
     wind, lee, missing = [], [], []
     for x in stations:

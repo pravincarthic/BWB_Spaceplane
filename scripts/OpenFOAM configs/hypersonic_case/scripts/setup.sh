@@ -18,6 +18,26 @@ set -euo pipefail
 # --------------------------------------------------------------------------
 MESH_FILE="${MESH_FILE:-$HOME/plain_BWB/Gmsh_without_cavities_AoA_neg5_20260822.msh}"
 
+# --------------------------------------------------------------------------
+# UNITS: the .msh is in MILLIMETRES, OpenFOAM works in METRES
+# --------------------------------------------------------------------------
+# scripts/final_meshing.py imports the STEP geometry (which is in metres) and
+# immediately scales it by 1000 so that every mesh-sizing constant in
+# scripts/gmsh_config.json can be written in mm - size_near 0.5, dist_max
+# 25000, far_field_length_mm 200000, and so on. The mesh it writes is
+# therefore in millimetres.
+#
+# gmshToFoam does NOT rescale on its own. Without -scale 0.001 the converted
+# polyMesh is numerically 1000x oversize: a 48 km vehicle in a 200 km box with
+# 0.5 m cells. Everything downstream is then wrong - the probe stations, the
+# rake lengths, the cutting-plane bounds, CofR, lRef, Aref, and the Reynolds
+# number - and none of it fails loudly, it just silently solves a different
+# problem. Step 3b below checks the converted bounding box for exactly this.
+#
+# Set MESH_SCALE=1 if your .msh is already in metres.
+# --------------------------------------------------------------------------
+MESH_SCALE="${MESH_SCALE:-0.001}"
+
 CASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../case" && pwd)"
 
 echo "=========================================="
@@ -25,6 +45,7 @@ echo "rhoCentralFoam case setup (OpenFOAM v2412)"
 echo "=========================================="
 echo "Case directory : $CASE_DIR"
 echo "Mesh file      : $MESH_FILE"
+echo "Mesh scale     : $MESH_SCALE  (mm to m)"
 echo ""
 
 if ! command -v rhoCentralFoam >/dev/null 2>&1; then
@@ -50,16 +71,52 @@ if [ ! -f "$MESH_FILE" ]; then
 fi
 
 cd "$CASE_DIR"
+mkdir -p ../logs
 
-echo "Step 1: converting mesh with gmshToFoam"
-gmshToFoam "$MESH_FILE"
+echo "Step 1: converting mesh with gmshToFoam (scale $MESH_SCALE)"
+gmshToFoam "$MESH_FILE" -scale "$MESH_SCALE"
 
 echo ""
 echo "Step 2: checking mesh integrity"
 checkMesh -allTopology -allGeometry | tee ../logs/checkMesh.log
 
 echo ""
-echo "Step 3: boundary patch names in the converted mesh"
+echo "Step 3a: UNIT CHECK - converted mesh bounding box"
+echo "-----------------------------------------------------------"
+# The far-field box is 200 m on a side (far_field_x0_mm -50000,
+# far_field_length_mm 200000, far_field_r_envelope_mm 100000), so in metres
+# the overall domain must be about x -50 to 150, y and z -100 to 100. If the
+# scale was not applied those numbers come back 1000x larger.
+BBOX_LINE="$(grep -m1 'Overall domain bounding box' ../logs/checkMesh.log || true)"
+echo "$BBOX_LINE"
+MAXC="$(printf '%s' "$BBOX_LINE" | tr -d '()' | awk '{print $NF}')"
+if [ -z "$MAXC" ]; then
+    echo "WARNING: could not parse the bounding box from checkMesh output."
+    echo "         Verify by hand that the domain is about 200 m across and"
+    echo "         that the vehicle is about 48 m long, not 48000."
+else
+    OVERSIZE="$(awk -v v="$MAXC" 'BEGIN { print (v > 1000) ? 1 : 0 }')"
+    if [ "$OVERSIZE" = "1" ]; then
+        echo ""
+        echo "ERROR: the converted mesh looks like it is still in MILLIMETRES."
+        echo "       Largest coordinate is $MAXC; in metres it should be about 100."
+        echo ""
+        echo "       Everything downstream assumes metres - probe stations,"
+        echo "       rake lengths, cutting-plane bounds, CofR, lRef, Aref and"
+        echo "       the Reynolds number. Running like this solves a vehicle"
+        echo "       1000x too large and nothing else will complain."
+        echo ""
+        echo "       Re-run with the scale applied:"
+        echo "           rm -rf $CASE_DIR/constant/polyMesh"
+        echo "           MESH_SCALE=0.001 bash scripts/setup.sh"
+        exit 1
+    fi
+    echo "OK: largest coordinate is $MAXC m - the mesh is in metres."
+fi
+echo "-----------------------------------------------------------"
+
+echo ""
+echo "Step 3b: boundary patch names in the converted mesh"
 echo "-----------------------------------------------------------"
 echo "These MUST match the patch names used in case/0/* and in the"
 echo "function objects: Inlet, Outlet, Atmosphere, Solid_Walls."
@@ -68,7 +125,7 @@ echo "-----------------------------------------------------------"
 foamDictionary -entry boundary -expand constant/polyMesh/boundary || true
 
 echo ""
-echo "Step 4: minimum cell size check"
+echo "Step 4: minimum cell size check (metres)"
 echo "-----------------------------------------------------------"
 echo "The run uses a FIXED 45 ns timestep. For the target CFL of 0.37 the"
 echo "smallest cell in the domain must be at least 0.424 mm:"

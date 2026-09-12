@@ -63,6 +63,11 @@ capture both.
 - **`reconstructPar` is no longer run.** Collated output is read directly by
   ParaView.
 - **The forces objects use stock `libforces.so`**, not `libstrathForces.so`.
+- **`gmshToFoam` now runs with `-scale 0.001`.** The `.msh` is in
+  millimetres and the case is in metres; the previous `setup.sh` converted
+  without scaling, which silently produced a mesh 1000x oversize. `setup.sh`
+  and `make_pse_probes.py` now both abort if the converted mesh is not
+  metre-scale. See `docs/PARAMETERS.md`, Units.
 - **`writeCompression` is now off.** With collated binary writes, gzip
   serialises through one thread and costs more than it saves.
 - **Validation status.** The dictionaries have been checked for structural
