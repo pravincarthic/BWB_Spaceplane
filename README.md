@@ -1,4 +1,4 @@
-# Numerical Investigation of Discrete Symmetry based Passive Micro-cavity Patterns for Boundary-Layer Control in a Hypersonic Blended Wing Body Spaceplane
+# Numerical Investigation of Discrete Symmetry-Based Passive Micro-Cavity Patterns for Boundary-Layer Control and Acoustic Second Mack Mode Attenuation in a Hypersonic Blended Wing Body Spaceplane
 
 ## Abstract
 
