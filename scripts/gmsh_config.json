@@ -1,7 +1,7 @@
 {
   "step_file": "D:\\BWB_git\\BWB_Spaceplane\\Design\\BWB_Spaceplane_v4_cavity_20260908.brep",
-  "output_file": "D:\\BWB_git\\BWB_Spaceplane\\Output\\Gmsh_with_cavities_AoA_neg5_20260908.msh",
-  "export_geometry_path": "D:\\BWB_git\\BWB_Spaceplane\\Output\\Geometry_precut_AoA_neg5_20260908.step",
+  "output_file": "D:\\BWB_git\\BWB_Spaceplane\\Output\\Gmsh_with_cavities_AoA_neg5_20260914.msh",
+  "export_geometry_path": "D:\\BWB_git\\BWB_Spaceplane\\Output\\Geometry_precut_AoA_neg5_20260914.step",
 
   "gmsh_parameters": {
     "Mesh.RandomFactor": 1e-5,
@@ -32,8 +32,8 @@
   "size_field_parameters": {
 	"min_feature_thickness": 1,
     "sharp_edge_gap_threshold_mm": 0.05,
-    "size_near": 0.5,
-    "size_far": 1000,
+    "size_near": 0.05,
+    "size_far": 1500,
     "dist_min": 300,
     "dist_max": 25000,
     "cavity_size": 1.0,
@@ -42,9 +42,9 @@
   },
 
   "boundary_layer_parameters": {
-    "Size": 3,
-    "Thickness": 25,
+    "Size": 0.05,
+    "Thickness": 30,
     "Ratio": 1.10,
-    "NbLayers": 20
+    "NbLayers": 43
   }
 }
