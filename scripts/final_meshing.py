@@ -221,9 +221,14 @@ def create_mesh(config_file='gmsh_config.json'):
     # unchanged and working purely in mm from this point on.
     # print("Step 2a: Converting imported geometry from metres to millimetres...")
     try:
-        #gmsh.model.occ.dilate(spaceplane_shapes, 0, 0, 0, 1000.0, 1000.0, 1000.0)
-        #gmsh.model.occ.synchronize()
-        print("[OK] Geometry scaled by 1000x (m -> mm)\n")
+        dilation_factor = geom_params.get('uniform_dilation_factor', 1)
+        if dilation_factor != 1.0:
+            print(f"  Scaling geometry by {dilation_factor}x (m -> mm)")
+            gmsh.model.occ.dilate(spaceplane_shapes, 0, 0, 0, dilation_factor, dilation_factor, dilation_factor)
+            gmsh.model.occ.synchronize()
+            print(f"[OK] Geometry scaled by {dilation_factor}x (m -> mm, maybe?)\n")
+        else:
+            print("  No scaling applied (uniform_dilation_factor=1 in config)\n")
     except Exception as e:
         print(f"[ERROR] Failed to scale geometry to mm: {e}")
         gmsh.finalize()
@@ -247,14 +252,25 @@ def create_mesh(config_file='gmsh_config.json'):
     # 4. ROTATE SPACEPLANE
     # ========================================================================
     rotation_angle_deg = geom_params.get("rotation_angle_deg", -5.0)
+    rotation_byCoM = geom_params.get("rotation_by_CoM", True)
     if rotation_angle_deg != 0.0:
 
         print(f"Step 4: Rotating spaceplane ({rotation_angle_deg} deg around Y-axis)...")
-        com_body = gmsh.model.occ.getCenterOfMass(3, spaceplane_tag)
-        print(f"  Center of Mass of Spaceplane: ({com_body[0]:.2f}, {com_body[1]:.2f}, {com_body[2]:.2f})")
+        if rotation_byCoM:
+            com_body = gmsh.model.occ.getCenterOfMass(3, spaceplane_tag)
+            print(f"  Center of Mass of Spaceplane: ({com_body[0]:.2f}, {com_body[1]:.2f}, {com_body[2]:.2f})")
+        else:
+            com_body = (0.0, 0.0, 0.0)
+            print(f"  Using origin as rotation point: ({com_body[0]:.2f}, {com_body[1]:.2f}, {com_body[2]:.2f})")
         angle_rad = rotation_angle_deg * math.pi / 180.0
         gmsh.model.occ.rotate([(3, spaceplane_tag)], com_body[0], com_body[1], com_body[2], 0, 1, 0, angle_rad)
         gmsh.model.occ.synchronize()
+        
+        if geom_params.get("test_for_CoM_only", False):
+            new_com = gmsh.model.occ.getCenterOfMass(3, spaceplane_tag)
+            print(f"  New Center of Mass after rotation: ({new_com[0]:.2f}, {new_com[1]:.2f}, {new_com[2]:.2f})")
+            gmsh.finalize()
+            return True  # Exit early if only testing CoM rotation
 
         exportStepFile(export_geometry_path + ".1.step",'')
 

@@ -1,7 +1,7 @@
 {
-  "step_file": "D:\\BWB_git\\BWB_Spaceplane\\Design\\BWB_Spaceplane_v4_cavity_20260908.brep",
-  "output_file": "D:\\BWB_git\\BWB_Spaceplane\\Output\\Gmsh_with_cavities_AoA_neg5_20260914.msh",
-  "export_geometry_path": "D:\\BWB_git\\BWB_Spaceplane\\Output\\Geometry_precut_AoA_neg5_20260914.step",
+  "step_file": "D:\\BWB_git\\BWB_Spaceplane\\Design\\BWB_Spaceplane_V2_20260822.brep",
+  "output_file": "D:\\BWB_git\\BWB_Spaceplane\\Output\\PlainBWB_mesh\\Gmsh_without_cavities_AoA_neg5_20260914.msh",
+  "export_geometry_path": "D:\\BWB_git\\BWB_Spaceplane\\Output\\PlainBWB_mesh\\Geometry_precut_AoA_neg5_20260914.step",
 
   "gmsh_parameters": {
     "Mesh.RandomFactor": 1e-5,
@@ -19,7 +19,10 @@
 
   "geometry_parameters": {
     "enable_thin_feature_enforcement": false,
-    "rotation_angle_deg": -5.0,
+    "rotation_angle_deg": -5,
+    "rotation_by_CoM": false,
+    "test_for_CoM_only": false,
+    "uniform_dilation_factor": 1000.0,
     "far_field_x0_mm": -50000,
     "far_field_length_mm": 200000,
     "far_field_r_envelope_mm": 100000,
