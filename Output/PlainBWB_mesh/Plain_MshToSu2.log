@@ -1,0 +1,9 @@
+Enter the path to the Gmsh .msh file: Info    : Reading '.\PlainBWB_mesh\Gmsh_without_cavities_AoA_neg5_20260914.msh'...
+Info    : 4996407 nodes
+Info    : 31029027 elements
+Info    : Done reading '.\PlainBWB_mesh\Gmsh_without_cavities_AoA_neg5_20260914.msh'
+Info    : Writing '.\PlainBWB_mesh\Gmsh_without_cavities_AoA_neg5_20260914.su2'...
+Info    : Writing 30469121 elements and 4996407 nodes
+Info    : Done writing '.\PlainBWB_mesh\Gmsh_without_cavities_AoA_neg5_20260914.su2'
+Scaling all nodes by a factor of 0.001 (mm to m). Total nodes: 4996407
+Successfully scaled all 1D, 2D, and 3D nodes. Converted .\PlainBWB_mesh\Gmsh_without_cavities_AoA_neg5_20260914.msh to .\PlainBWB_mesh\Gmsh_without_cavities_AoA_neg5_20260914.su2
