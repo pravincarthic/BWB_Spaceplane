@@ -1,0 +1,9 @@
+Enter the path to the Gmsh .msh file: Info    : Reading '.\CavityBWB_mesh\Gmsh_with_cavities_AoA_neg5_20260914.msh'...
+Info    : 5037646 nodes
+Info    : 31186314 elements
+Info    : Done reading '.\CavityBWB_mesh\Gmsh_with_cavities_AoA_neg5_20260914.msh'
+Info    : Writing '.\CavityBWB_mesh\Gmsh_with_cavities_AoA_neg5_20260914.su2'...
+Info    : Writing 30539158 elements and 5037646 nodes
+Info    : Done writing '.\CavityBWB_mesh\Gmsh_with_cavities_AoA_neg5_20260914.su2'
+Scaling all nodes by a factor of 0.001 (mm to m). Total nodes: 5037646
+Successfully scaled all 1D, 2D, and 3D nodes. Converted .\CavityBWB_mesh\Gmsh_with_cavities_AoA_neg5_20260914.msh to .\CavityBWB_mesh\Gmsh_with_cavities_AoA_neg5_20260914.su2

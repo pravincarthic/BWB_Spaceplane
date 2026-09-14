@@ -1,0 +1,119 @@
+----------------
+Base information
+----------------
+
+Name: Gmsh_with_cavities_AoA_neg5_20260914
+Object: Mesh
+
+Nodes: 5037646
+
+Elements: 31186314
+    Linear: 31186314
+    Quadratic: 0
+    Bi-Quadratic: 0
+
+    0D: 0
+
+    Balls: 0
+
+    1D (edges): 0
+        Linear: 0
+        Quadratic: 0
+
+    2D (faces): 647156
+        Linear: 647156
+        Quadratic: 0
+        Bi-Quadratic: 0
+
+        Triangles: 647156
+            Linear: 647156
+            Quadratic: 0
+            Bi-Quadratic: 0
+        Quadrangles: 0
+            Linear: 0
+            Quadratic: 0
+            Bi-Quadratic: 0
+        Polygons: 0
+            Linear: 0
+            Quadratic: 0
+
+    3D (volumes): 30539158
+        Linear: 30539158
+        Quadratic: 0
+        Bi-Quadratic: 0
+
+        Tetrahedrons: 30539158
+            Linear: 30539158
+            Quadratic: 0
+        Hexahedrons: 0
+            Linear: 0
+            Quadratic: 0
+            Bi-Quadratic: 0
+        Pyramids: 0
+            Linear: 0
+            Quadratic: 0
+        Prisms: 0
+            Linear: 0
+            Quadratic: 0
+            Bi-Quadratic: 0
+        Hexagonal Prisms: 0
+        Polyhedrons: 0
+
+-------------------
+Element information
+-------------------
+
+----------------------
+Additional information
+----------------------
+
+Name: Gmsh_with_cavities_AoA_neg5_20260914
+    Type: Imported
+    File name: C:\Users\pravi\AppData\Roaming\979620\Gmsh_with_cavities_AoA_neg5_20260914.med
+    Size: 1699415963
+    Version: 6.0.1
+    Groups
+        Volumes
+            Group_Of_All_Volumes
+                Type: Standalone group
+                Size: 30539158
+                Color: #ffaa00
+                Underlying nodes
+        Faces
+            Outlet
+                Type: Standalone group
+                Size: 92574
+                Color: #ffaa00
+                Underlying nodes: 46688
+            Atmosphere
+                Type: Standalone group
+                Size: 370222
+                Color: #ffaa00
+                Underlying nodes
+            Inlet
+                Type: Standalone group
+                Size: 92552
+                Color: #ffaa00
+                Underlying nodes: 46677
+            Solid_Walls
+                Type: Standalone group
+                Size: 91808
+                Color: #ffaa00
+                Underlying nodes: 45906
+
+-------------------
+Quality information
+-------------------
+
+Name:  Gmsh_with_cavities_AoA_neg5_20260914
+Nodes Information:
+    Number of the free nodes: 
+    Number of the double nodes: 
+Edges Information:
+    Number of the double edges: 
+Faces Information:
+    Number of the double faces: 
+    Number of the over-constrained: 
+Volumes Information:
+    Number of the double volumes: 
+    Number of the over-constrained: 

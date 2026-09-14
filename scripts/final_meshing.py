@@ -22,7 +22,7 @@ def load_config(config_file):
         print(f"[ERROR] Error reading config file: {e}")
         return None
 
-def exportStepFile(export_geometry_path, spaceplane_inspection_tags):
+def exportStepFile(export_geometry_path, spaceplane_inspection_tags=None):
     if export_geometry_path:
         print(f"Exporting pre-mesh geometry for inspection...")
         try:
@@ -30,11 +30,11 @@ def exportStepFile(export_geometry_path, spaceplane_inspection_tags):
             file_size = os.path.getsize(export_geometry_path)
             print(f"  [OK] Geometry exported: {export_geometry_path}")
             print(f"    Size: {file_size / 1024:.1f} KB")
-            print(f"    Includes both the fluid domain AND a separate copy of the")
-            print(f"    spaceplane solid (volume(s) {spaceplane_inspection_tags}), so the")
-            print(f"    aircraft shape is visible directly, not just as a hidden cavity.")
-            print(f"    Open this in SALOME (File > Import > STEP) to inspect the cuts")
-            print(f"    and thickened features before meshing.\n")
+            #print(f"    Includes both the fluid domain AND a separate copy of the")
+            #print(f"    spaceplane solid (volume(s) {spaceplane_inspection_tags}), so the")
+            #print(f"    aircraft shape is visible directly, not just as a hidden cavity.")
+            #print(f"    Open this in SALOME (File > Import > STEP) to inspect the cuts")
+            #print(f"    and thickened features before meshing.\n")
         except Exception as e:
             print(f"  [WARNING] Geometry export failed: {e}")
             print(f"    Continuing with meshing anyway.\n")
@@ -183,14 +183,6 @@ def create_mesh(config_file='gmsh_config.json'):
     print("Step 1: Initializing Gmsh...")
     gmsh.initialize()
     gmsh.option.setNumber("Mesh.RandomFactor", gmsh_params.get("Mesh.RandomFactor", 1e-5))
-    # gmsh.option.setNumber("Geometry.AutoCoherence", False)
-    # gmsh.option.setNumber("Geometry.OCCMakeSolids", 0)
-    # gmsh.option.setNumber("Geometry.Tolerance", 1000)
-    # gmsh.option.setNumber("Geometry.OCCUnionUnify", 0)
-    # gmsh.option.setNumber("Geometry.OCCFixDegenerated", 0)
-    # gmsh.option.setNumber("Geometry.OCCFixSmallEdges", 0)
-    # gmsh.option.setNumber("Geometry.OCCFixSmallFaces", 0)
-    #gmsh.option.setNumber("Geometry.OCCScalingFactor", 1000.0)
     gmsh.option.setNumber("General.NumThreads", gmsh_params.get("General.NumThreads", 16))
     gmsh.model.add("BWB_Spaceplane_Mesh")
     print("[OK] Gmsh initialized\n")
@@ -255,14 +247,20 @@ def create_mesh(config_file='gmsh_config.json'):
     # 4. ROTATE SPACEPLANE
     # ========================================================================
     rotation_angle_deg = geom_params.get("rotation_angle_deg", -5.0)
-    print(f"Step 4: Rotating spaceplane ({rotation_angle_deg} deg around Y-axis)...")
-    angle_rad = rotation_angle_deg * math.pi / 180.0
-    gmsh.model.occ.rotate([(3, spaceplane_tag)], 0, 0, 0, 0, 1, 0, angle_rad)
-    gmsh.model.occ.synchronize()
+    if rotation_angle_deg != 0.0:
 
-    exportStepFile(export_geometry_path + ".1.step",'')
+        print(f"Step 4: Rotating spaceplane ({rotation_angle_deg} deg around Y-axis)...")
+        com_body = gmsh.model.occ.getCenterOfMass(3, spaceplane_tag)
+        print(f"  Center of Mass of Spaceplane: ({com_body[0]:.2f}, {com_body[1]:.2f}, {com_body[2]:.2f})")
+        angle_rad = rotation_angle_deg * math.pi / 180.0
+        gmsh.model.occ.rotate([(3, spaceplane_tag)], com_body[0], com_body[1], com_body[2], 0, 1, 0, angle_rad)
+        gmsh.model.occ.synchronize()
 
-    print("[OK] Spaceplane rotated\n")
+        exportStepFile(export_geometry_path + ".1.step",'')
+
+        print("[OK] Spaceplane rotated\n")
+    else:
+        print("Step 4: No rotation applied (rotation_angle_deg=0 in config)\n")
 
     boundary_entities = gmsh.model.getBoundary([(3, spaceplane_tag)], combined=False, oriented=False)
     spaceplane_faces = [tag for dim, tag in boundary_entities if dim == 2]
@@ -305,68 +303,6 @@ def create_mesh(config_file='gmsh_config.json'):
           "using the spaceplane's raw imported geometry, unmodified.\n")
     spaceplane_tags = [spaceplane_tag]
 
-    # if not enable_thin_feature_enforcement:
-    #     #print("Step 4a: SKIPPED (enable_thin_feature_enforcement=false in config) - "
-    #     #      "using the spaceplane's raw imported geometry, unmodified.\n")
-    #     #spaceplane_tags = [spaceplane_tag]
-    # else:
-    #     # Moved here from post-cut Step 6a. enforce_minimum_thickness() extrudes
-    #     # a thin surface by `deficit` along its own shortest local axis and
-    #     # fragments the resulting sliver into the current solid - this is only
-    #     # geometrically meaningful while the spaceplane is still a SOLID: the
-    #     # extrusion adds material to a thin slab, thickening it.
-    #     #
-    #     # Run after the boolean cut (as it was previously), those same surfaces
-    #     # are no longer solid material - they are the CAVITY WALL of the fluid
-    #     # domain where the spaceplane used to be. Extruding a cavity-wall
-    #     # surface by ~1mm along an arbitrarily-chosen local axis (picked purely
-    #     # by whichever of dx/dy/dz is locally smallest, with no notion of
-    #     # "into the solid" vs "into the fluid") does not thicken the aircraft
-    #     # skin anymore; depending on direction, it either pokes a harmless
-    #     # sliver into the fluid volume or - worse - carves into/disconnects the
-    #     # thin cavity wall right at the spaceplane's thinnest features, which is
-    #     # what was corrupting the Solid_Walls boundary group.
-    #     #
-    #     # Running this on the solid, pre-cut, thickens the actual aircraft skin
-    #     # while it is still solid material. The boolean cut then subtracts an
-    #     # already-thickened solid, producing a clean cavity wall with no
-    #     # post-cut geometry surgery needed.
-    #     print("Step 4a: Enforcing minimum thickness on thin features (pre-cut, on solid)...")
-    #     min_thickness = size_params.get("min_feature_thickness", 1.0)
-    #     thin_feature_skip_above = geom_params.get("thin_feature_skip_above_mm", 50000)
-    #     planar_face_guard = geom_params.get("planar_face_guard_mm", 2000)
-    #     # Below this native-gap threshold, a thin feature is treated as an
-    #     # INTENTIONAL zero-thickness design edge (e.g. a trailing edge meant to
-    #     # come to a physical point) rather than a thin wall that merely needs
-    #     # padding to min_thickness - see enforce_minimum_thickness docstring.
-    #     # Default (0.05mm) sits comfortably above typical STEP/BREP export
-    #     # noise (~0.001-0.01mm) but far below any real structural wall.
-    #     sharp_edge_gap_threshold = size_params.get("sharp_edge_gap_threshold_mm", 0.05)
-    #     #spaceplane_tags, failed_thin_features, sharp_edges = enforce_minimum_thickness(
-    #     #    spaceplane_tag, min_thickness=min_thickness, skip_above=thin_feature_skip_above,
-    #     #    planar_face_guard=planar_face_guard, sharp_edge_gap_threshold=sharp_edge_gap_threshold
-    #     #)
-    #     #print(f"[OK] Spaceplane solid now spans volume(s): {spaceplane_tags}\n")
-
-    #     # Seal BOTH intentional sharp edges (never padded - see above) and any
-    #     # feature that fragment() tried and failed to thicken (see
-    #     # seal_sharp_and_failed_features docstring). Root cause of the run this
-    #     # replaces: Surface 11, a 3.03 x 34.67 x 0.0088mm trailing edge that IS
-    #     # supposed to be zero-thickness by design, was left at its native gap -
-    #     # far smaller than the ~2mm wall mesh size - which is what made HXT
-    #     # fail with "Found two exactly self-intersecting facets". This is a
-    #     # no-op when both lists are empty.
-    #     # heal_tolerance=None (config default/absent) means auto-derive a
-    #     # tolerance per feature from its own native gap - see
-    #     # seal_sharp_and_failed_features docstring for why a single coarse
-    #     # tolerance across the whole assembly previously corrupted the model.
-    #     # Only set heal_tolerance_mm in config to override that with one fixed
-    #     # value for every feature sealed here.
-    #     heal_tolerance = geom_params.get("heal_tolerance_mm", None)
-    #     #spaceplane_tags = seal_sharp_and_failed_features(
-    #     #    spaceplane_tags, sharp_edges + failed_thin_features, min_thickness,
-    #     #    heal_tolerance=heal_tolerance
-    #     #)
 
     # ========================================================================
     # 5. CREATE FAR-FIELD DOMAIN (cuboid, NOT a cone)
@@ -476,9 +412,9 @@ def create_mesh(config_file='gmsh_config.json'):
     # still before Step 7 builds any physical groups - see Step 6b's own
     # comment for why that ordering matters) so it can never reach Step 11
     # mesh generation as a stray, un-meshed volume.
-    spaceplane_inspection_copy = gmsh.model.occ.copy([(3, t) for t in spaceplane_tags])
-    gmsh.model.occ.synchronize()
-    spaceplane_inspection_tags = [tag for dim, tag in spaceplane_inspection_copy if dim == 3]
+    #spaceplane_inspection_copy = gmsh.model.occ.copy([(3, t) for t in spaceplane_tags])
+    #gmsh.model.occ.synchronize()
+    #spaceplane_inspection_tags = [tag for dim, tag in spaceplane_inspection_copy if dim == 3]
 
     # ========================================================================
     # ========================================================================
@@ -599,7 +535,7 @@ def create_mesh(config_file='gmsh_config.json'):
         # built from the model's FINAL, stable numbering - no operation
         # that can renumber entities runs after this point until meshing.
         
-        exportStepFile(export_geometry_path, spaceplane_inspection_tags)
+        #exportStepFile(export_geometry_path, spaceplane_inspection_tags)
 
         # Filter to tags that actually still exist before calling remove() -
         # gmsh.model.occ.copy() on multiple input solids can itself produce
@@ -609,12 +545,12 @@ def create_mesh(config_file='gmsh_config.json'):
         # OpenCASCADE entity" warning entirely instead of relying on
         # remove()'s own tolerance for a partially-invalid list.
         existing_3d_tags = {tag for dim, tag in gmsh.model.getEntities(3)}
-        inspection_tags_to_remove = [t for t in spaceplane_inspection_tags if t in existing_3d_tags]
-        if inspection_tags_to_remove:
-            gmsh.model.occ.remove([(3, t) for t in inspection_tags_to_remove], recursive=True)
-            gmsh.model.occ.synchronize()
-            print(f"  [OK] Removed spaceplane inspection copy (volume(s) "
-                  f"{inspection_tags_to_remove}) - not part of the fluid mesh")
+        #inspection_tags_to_remove = [t for t in spaceplane_inspection_tags if t in existing_3d_tags]
+        #if inspection_tags_to_remove:
+        #    gmsh.model.occ.remove([(3, t) for t in inspection_tags_to_remove], recursive=True)
+        #    gmsh.model.occ.synchronize()
+        #    print(f"  [OK] Removed spaceplane inspection copy (volume(s) "
+        #          f"{inspection_tags_to_remove}) - not part of the fluid mesh")
 
         # The removal above can renumber the REAL fluid-domain volumes too
         # (same lesson as removeAllDuplicates() above) - re-resolve from the
