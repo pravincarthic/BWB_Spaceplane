@@ -10,7 +10,7 @@
     "Mesh.MeshSizeMax": 1000,
     "Mesh.MeshSizeFromCurvature": 20,
     "Mesh.Algorithm": 6,
-    "Mesh.Algorithm3D": 10,
+    "Mesh.Algorithm3D": 1,
     "Mesh.Smoothing": 5,
     "Mesh.ElementOrder": 1,
     "Mesh.MshFileVersion": 2.2,
@@ -49,5 +49,11 @@
     "Thickness": 30,
     "Ratio": 1.10,
     "NbLayers": 43
+  },
+
+  "utility_parameters": {
+    "su2_dilation_factor": 1e-3,
+    "enable_su2_export": true,
+    "invoke_mesh_stats": false
   }
 }

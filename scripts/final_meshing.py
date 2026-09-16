@@ -3,6 +3,7 @@ import math
 import os
 import sys
 import json
+import numpy as np
 
 def load_config(config_file):
     """Load gmsh parameters and file paths from config file."""
@@ -172,6 +173,7 @@ def create_mesh(config_file='gmsh_config.json'):
     # thresholds) - kept out of code so a new design/orientation/domain size
     # never requires editing this script, only the config file.
     geom_params = config.get('geometry_parameters', {})
+    util_params = config.get('utility_parameters', {})
 
     inlet_faces = []
     outlet_faces = []
@@ -749,12 +751,13 @@ def create_mesh(config_file='gmsh_config.json'):
     # list today means this is a no-op and behaves exactly like the base
     # field alone.
     cavity_surface_tags = size_params.get("cavity_surface_tags", [])
-    background_field = add_cavity_refinement_fields(
-        cavity_surface_tags, (dist_field, thresh_field), size_params
-    )
-
-    gmsh.model.mesh.field.setAsBackgroundMesh(background_field)
-    print(f"[OK] Background mesh field set (field id {background_field})\n")
+    if len(cavity_surface_tags) > 0:
+        print(f"  [INFO] Cavity refinement requested for surfaces: {cavity_surface_tags}")
+        background_field = add_cavity_refinement_fields(
+            cavity_surface_tags, (dist_field, thresh_field), size_params
+        )
+        gmsh.model.mesh.field.setAsBackgroundMesh(background_field)
+        print(f"[OK] Background mesh field set (field id {background_field})\n")
 
     # ========================================================================
     # 10. VISCOUS LAYER INFLATION - FROM CONFIG
@@ -778,22 +781,24 @@ def create_mesh(config_file='gmsh_config.json'):
     all_edges = list(set(all_edges))
     print(f"  Found {len(all_edges)} boundary layer edges")
 
-    if all_edges:
+    if all_edges and solid_walls_faces:
         gmsh.model.mesh.field.setNumbers(bl_field, "EdgesList", all_edges)
-        gmsh.model.mesh.field.setNumber(bl_field, "Size", bl_params.get("Size", 0.002))
-        gmsh.model.mesh.field.setNumber(bl_field, "Thickness", bl_params.get("Thickness", 0.0118))
-        gmsh.model.mesh.field.setNumber(bl_field, "Ratio", bl_params.get("Ratio", 1.16))
+        #gmsh.model.mesh.field.setNumbers(bl_field, "FacesList", list(solid_walls_faces))
+        gmsh.model.mesh.field.setNumber(bl_field, "hwall_n", bl_params.get("Size", 0.002))
+        gmsh.model.mesh.field.setNumber(bl_field, "thickness", bl_params.get("Thickness", 0.0118))
+        gmsh.model.mesh.field.setNumber(bl_field, "ratio", bl_params.get("Ratio", 1.16))
         gmsh.model.mesh.field.setNumber(bl_field, "NbLayers", bl_params.get("NbLayers", 45))
         # BoundaryLayer field takes over as background mesh near walls; it
         # does not conflict with the Threshold field used for the bulk
         # domain because gmsh applies BoundaryLayer specially at walls.
         gmsh.model.mesh.field.setAsBackgroundMesh(bl_field)
         print("[OK] Viscous layers configured:")
+        print(f"    - Size: {bl_params.get('Size', 0.002)}")
         print(f"    - Thickness: {bl_params.get('Thickness', 0.0118)}")
         print(f"    - Stretch ratio: {bl_params.get('Ratio', 1.16)}")
         print(f"    - Number of layers: {bl_params.get('NbLayers', 45)}\n")
     else:
-        print("[ERROR] No edges found for boundary layers\n")
+        print("[ERROR] Either edges or faces found for boundary layers\n")
 
     # ========================================================================
     # 11. MESH GENERATION (HXT for 3D only - see Step 9)
@@ -818,6 +823,22 @@ def create_mesh(config_file='gmsh_config.json'):
             gmsh.option.setNumber("Mesh.MshFileVersion", gmsh_params.get("Mesh.MshFileVersion", 2.2))
             gmsh.write(output_path)
             file_size = os.path.getsize(output_path)
+
+            if util_params.get("export_su2", False):
+                # 12.1. Pull absolute list of all node tags across all dimensions (1D, 2D, and 3D)
+                node_tags, coords, _ = gmsh.model.mesh.getNodes()
+
+                # 12.2. Bulk multiply the raw coordinates uniformly (e.g., mm -> m)
+                scaled_coords = np.array(coords) * util_params.get("su2_dilation_factor", 1e-3)
+                print(f"Scaling all nodes by a factor of {util_params.get('su2_dilation_factor', 1e-3)} (mm to m). Total nodes: {len(node_tags)}")
+
+                # 12.3. Update the positions of all individual nodes in Gmsh's database
+                for tag, coord in zip(node_tags, scaled_coords.reshape(-1, 3)):
+                    gmsh.model.mesh.setNode(tag, coord.tolist(), [])
+
+                gmsh.model.geo.synchronize()
+                gmsh.write(output_path.replace('.msh', '.su2'))
+
             print(f"[OK] Mesh exported successfully")
             print(f"  File: {output_path}")
             print(f"  Size: {file_size / 1024 / 1024:.2f} MB\n")
