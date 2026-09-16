@@ -5,877 +5,1398 @@ import sys
 import json
 import numpy as np
 
-def load_config(config_file):
-    """Load gmsh parameters and file paths from config file."""
-    if not os.path.exists(config_file):
-        print(f"[ERROR] Error: Config file not found: {config_file}")
-        return None
+# Empirically measured on gmsh 4.15.2: a tetrahedral fill contains about this
+# many tets per h^3 of volume, where h is the local target size. Measured by
+# meshing a 100^3 box at h=50, 25 and 10 (4955 tets at h=10). Used by the
+# pre-flight element budget estimate.
+TETS_PER_CUBED_SIZE = 5.0
 
+
+def load_config(config_file):
+    if not os.path.exists(config_file):
+        print(f"Config file not found: {config_file}")
+        return None
     try:
         with open(config_file, 'r') as f:
             config = json.load(f)
-        print(f"[OK] Config loaded from: {config_file}\n")
+        print(f"Config loaded: {config_file}\n")
         return config
     except json.JSONDecodeError as e:
-        print(f"[ERROR] Error parsing config file: {e}")
+        print(f"Config parse error: {e}")
         return None
     except Exception as e:
-        print(f"[ERROR] Error reading config file: {e}")
+        print(f"Config read error: {e}")
         return None
 
-def exportStepFile(export_geometry_path, spaceplane_inspection_tags=None):
-    if export_geometry_path:
-        print(f"Exporting pre-mesh geometry for inspection...")
-        try:
-            gmsh.write(export_geometry_path)
-            file_size = os.path.getsize(export_geometry_path)
-            print(f"  [OK] Geometry exported: {export_geometry_path}")
-            print(f"    Size: {file_size / 1024:.1f} KB")
-            #print(f"    Includes both the fluid domain AND a separate copy of the")
-            #print(f"    spaceplane solid (volume(s) {spaceplane_inspection_tags}), so the")
-            #print(f"    aircraft shape is visible directly, not just as a hidden cavity.")
-            #print(f"    Open this in SALOME (File > Import > STEP) to inspect the cuts")
-            #print(f"    and thickened features before meshing.\n")
-        except Exception as e:
-            print(f"  [WARNING] Geometry export failed: {e}")
-            print(f"    Continuing with meshing anyway.\n")
-    else:
-        print("Export: No 'export_geometry_path' set in config - skipping pre-mesh "
-                "geometry export.\n")
 
-def setup_size_field(solid_walls_faces, size_params):
+def export_step(path):
+    if not path:
+        return
+    try:
+        gmsh.write(path)
+        print(f"Geometry exported: {path} ({os.path.getsize(path) / 1024:.1f} KB)")
+    except Exception as e:
+        print(f"Geometry export failed: {e}")
+
+
+def probe_field_options(field_type, candidates):
     """
-    Build a spatially-varying mesh size field instead of relying on one
-    global MeshSizeMin/MeshSizeMax pair.
+    Return the subset of candidate option names the installed gmsh accepts on
+    this field type.
 
-    Logic:
-      - Distance field measures distance from the solid-wall (aircraft) surfaces.
-      - Threshold field maps that distance to element size:
-          size = size_near   for distance <= dist_min
-          size = size_far    for distance >= dist_max
-          smooth linear ramp in between
-      - This field is set as the background mesh, so it is the primary driver
-        of element size everywhere. Mesh.MeshSizeMin/Max are kept only as
-        global safety bounds, not as the thing doing the sizing.
-
-    size_params keys (all in model units, mm):
-      size_near   - element size right at the aircraft surface (fine)
-      size_far    - element size far away, near the cone boundary (coarse)
-      dist_min    - distance from aircraft below which size_near applies
-      dist_max    - distance from aircraft beyond which size_far applies
-
-    Returns the field id of the extra refinement field list, so cavity/detail
-    fields can be added later without rebuilding the base field.
+    Option names are not stable across gmsh versions, and an assignment to an
+    unknown option raises on some builds and only warns on others, which means
+    a field can silently keep its defaults while the script reports success.
+    Probes a throwaway field, then removes it.
     """
-    print("Setting up spatially-varying mesh size field...\n")
+    # Probing is done by attempting assignments, so gmsh logs an Error for
+    # every name that turns out not to exist and a Warning for every scalar
+    # option tried as a list. Those lines are the probe working as intended,
+    # not failures, so the terminal is silenced for the duration rather than
+    # leaving alarming output in the log.
+    try:
+        terminal = gmsh.option.getNumber("General.Terminal")
+    except Exception:
+        terminal = 1
+    gmsh.option.setNumber("General.Terminal", 0)
+    probe = gmsh.model.mesh.field.add(field_type)
+    valid = []
+    try:
+        for name in candidates:
+            ok = False
+            try:
+                gmsh.model.mesh.field.setNumber(probe, name, 1.0)
+                ok = True
+            except Exception:
+                try:
+                    gmsh.model.mesh.field.setNumbers(probe, name, [1.0])
+                    ok = True
+                except Exception:
+                    ok = False
+            if ok:
+                valid.append(name)
+    finally:
+        gmsh.model.mesh.field.remove(probe)
+        gmsh.option.setNumber("General.Terminal", terminal)
+    return valid
 
-    size_near = size_params.get("size_near", 2)
-    size_far = size_params.get("size_far", 500)
-    dist_min = size_params.get("dist_min", 200)
-    dist_max = size_params.get("dist_max", 20000)
 
-    print(f"  size_near = {size_near} mm  (at the aircraft surface)")
-    print(f"  size_far  = {size_far} mm  (far-field / near the cone)")
-    print(f"  dist_min  = {dist_min} mm  (ramp starts)")
-    print(f"  dist_max  = {dist_max} mm  (ramp ends)\n")
+def auto_sampling(wall_faces, dist_min, size_params):
+    """
+    Choose the Distance field Sampling count from the size of the wall.
 
-    # 1. Distance field from the solid wall surfaces
+    Sampling is how many points gmsh places per wall entity when building the
+    distance function, so the distance field is only accurate to roughly
+    (entity extent / Sampling). A fixed 100 on a 49 m body resolves distance to
+    about half a metre, coarser than the whole near-wall band it is meant to
+    position. Verified on a 500 mm plate with a 5 mm band: element count kept
+    changing up to Sampling=100 and saturated after, i.e. once the sample
+    spacing became finer than the band.
+    """
+    max_extent = 0.0
+    for f in wall_faces:
+        bb = gmsh.model.getBoundingBox(2, f)
+        max_extent = max(max_extent, bb[3] - bb[0], bb[4] - bb[1], bb[5] - bb[2])
+
+    cap = size_params.get("max_sampling", 400)
+    floor = size_params.get("min_sampling", 20)
+    needed = cap if dist_min <= 0 else int(math.ceil(max_extent / dist_min))
+    sampling = max(floor, min(cap, needed))
+
+    print(f"Distance sampling: largest wall extent={max_extent:.0f}mm "
+          f"dist_min={dist_min}mm needed={needed} using={sampling}")
+    if needed > cap:
+        print(f"  Warning: capped at {cap}. The near-wall band is positioned to "
+              f"about {max_extent / sampling:.0f}mm accuracy, so a dist_min "
+              "below that is not meaningful. Raise max_sampling if needed.")
+    return sampling
+
+
+def setup_size_field(wall_faces, size_params):
+    size_near = size_params.get("size_near", 2.0)
+    size_far = size_params.get("size_far", 500.0)
+    dist_min = size_params.get("dist_min", 200.0)
+    dist_max = size_params.get("dist_max", 20000.0)
+
+    sampling = auto_sampling(wall_faces, dist_min, size_params)
+
     dist_field = gmsh.model.mesh.field.add("Distance")
-    gmsh.model.mesh.field.setNumbers(dist_field, "SurfacesList", solid_walls_faces)
-    # Sampling density along the surfaces used to evaluate distance
-    gmsh.model.mesh.field.setNumber(dist_field, "Sampling", 100)
+    gmsh.model.mesh.field.setNumbers(dist_field, "SurfacesList", wall_faces)
+    gmsh.model.mesh.field.setNumber(dist_field, "Sampling", sampling)
 
-    # 2. Threshold field maps distance -> element size, with smooth transition
     thresh_field = gmsh.model.mesh.field.add("Threshold")
     gmsh.model.mesh.field.setNumber(thresh_field, "InField", dist_field)
     gmsh.model.mesh.field.setNumber(thresh_field, "SizeMin", size_near)
     gmsh.model.mesh.field.setNumber(thresh_field, "SizeMax", size_far)
     gmsh.model.mesh.field.setNumber(thresh_field, "DistMin", dist_min)
     gmsh.model.mesh.field.setNumber(thresh_field, "DistMax", dist_max)
-    gmsh.model.mesh.field.setNumber(thresh_field, "Sigmoid", 1)  # smooth transition, not linear kink
+    gmsh.model.mesh.field.setNumber(thresh_field, "Sigmoid", 1)
 
-    print(f"  [OK] Distance field {dist_field} created from {len(solid_walls_faces)} solid wall surfaces")
-    print(f"  [OK] Threshold field {thresh_field} created (fine near geometry, coarse far away)\n")
+    print(f"Size field: near={size_near}mm far={size_far}mm "
+          f"dist_min={dist_min}mm dist_max={dist_max}mm\n")
+    return thresh_field
 
-    return dist_field, thresh_field
+
+def setup_box_field(label, box, size_in, size_out, thickness):
+    """Create a Box sizing field. box is (xmin, xmax, ymin, ymax, zmin, zmax)."""
+    xmin, xmax, ymin, ymax, zmin, zmax = box
+    f = gmsh.model.mesh.field.add("Box")
+    for key, val in (("XMin", xmin), ("XMax", xmax), ("YMin", ymin),
+                     ("YMax", ymax), ("ZMin", zmin), ("ZMax", zmax),
+                     ("VIn", size_in), ("VOut", size_out)):
+        gmsh.model.mesh.field.setNumber(f, key, val)
+    if thickness > 0:
+        gmsh.model.mesh.field.setNumber(f, "Thickness", thickness)
+    print(f"{label} box field {f}: X=[{xmin:.0f},{xmax:.0f}] "
+          f"Y=[{ymin:.0f},{ymax:.0f}] Z=[{zmin:.0f},{zmax:.0f}] size_in={size_in}mm")
+    return f
 
 
-def add_cavity_refinement_fields(cavity_surface_tags, base_field_ids, size_params):
+def nose_box(nose_params, body_bbox, half_model, sym_coord):
     """
-    Add extra fine-mesh fields targeting specific surfaces (e.g. mm-scale
-    cavities in a future design). This does NOT touch the global size field
-    or the far-field cone settings - it only pins a finer size near the
-    listed surfaces.
+    Absolute size cap over the nose region, independent of curvature.
 
-    cavity_surface_tags: list of surface tags that need extra refinement
-    base_field_ids: (dist_field, thresh_field) from setup_size_field
-    size_params: same dict as setup_size_field, reads 'cavity_size' and
-                 'cavity_dist_max' if present
-
-    Returns the combined field id (Min of all fields) to be set as background mesh.
+    Curvature sizing gives size = 2*pi*R/N, so it only ever places N nodes
+    around a full circle however small R is, and on a locally near flat blended
+    surface between two tight edges it asks for nothing. That is what leaves a
+    chiselled stagnation region, which is the worst possible place for it.
+    Verified that curvature sizing still applies alongside a background field,
+    the minimum of the two being taken, so this box can only refine further.
     """
-    dist_field, thresh_field = base_field_ids
-    field_ids_to_combine = [thresh_field]
+    if not nose_params.get("enable", True):
+        return None
+    bx_min, by_min, bz_min, bx_max, by_max, bz_max = body_bbox
+    body_length = bx_max - bx_min
+    if body_length <= 0:
+        return None
 
-    if cavity_surface_tags:
-        cavity_size = size_params.get("cavity_size", size_params.get("size_near", 2) / 2)
-        cavity_dist_max = size_params.get("cavity_dist_max", 50)
-
-        print(f"Adding cavity refinement: {len(cavity_surface_tags)} surfaces, "
-              f"size={cavity_size}mm within {cavity_dist_max}mm\n")
-
-        cav_dist_field = gmsh.model.mesh.field.add("Distance")
-        gmsh.model.mesh.field.setNumbers(cav_dist_field, "SurfacesList", cavity_surface_tags)
-        gmsh.model.mesh.field.setNumber(cav_dist_field, "Sampling", 100)
-
-        cav_thresh_field = gmsh.model.mesh.field.add("Threshold")
-        gmsh.model.mesh.field.setNumber(cav_thresh_field, "InField", cav_dist_field)
-        gmsh.model.mesh.field.setNumber(cav_thresh_field, "SizeMin", cavity_size)
-        gmsh.model.mesh.field.setNumber(cav_thresh_field, "SizeMax", size_params.get("size_far", 500))
-        gmsh.model.mesh.field.setNumber(cav_thresh_field, "DistMin", 0)
-        gmsh.model.mesh.field.setNumber(cav_thresh_field, "DistMax", cavity_dist_max)
-        gmsh.model.mesh.field.setNumber(cav_thresh_field, "Sigmoid", 1)
-
-        field_ids_to_combine.append(cav_thresh_field)
-
-    if len(field_ids_to_combine) > 1:
-        # Take the minimum size at every point across all fields, so the
-        # finest applicable requirement always wins.
-        min_field = gmsh.model.mesh.field.add("Min")
-        gmsh.model.mesh.field.setNumbers(min_field, "FieldsList", field_ids_to_combine)
-        return min_field
-    else:
-        return field_ids_to_combine[0]
+    frac = nose_params.get("length_fraction", 0.12)
+    pad = nose_params.get("lateral_pad_mm", 500.0)
+    x_end = nose_params.get("XMax", bx_min + frac * body_length)
+    box = (bx_min - pad, x_end,
+           sym_coord if half_model else by_min - pad, by_max + pad,
+           bz_min - pad, bz_max + pad)
+    return (box,
+            nose_params.get("size_mm", 5.0),
+            nose_params.get("transition_thickness_mm", 1000.0))
 
 
-def create_mesh(config_file='gmsh_config.json'):
-    print(gmsh.__version__)
-    print("\n" + "=" * 80)
-    print("BWB SPACEPLANE MESH GENERATION - TEMPLATE BASED")
-    print("=" * 80 + "\n")
+def shock_box(shock_params, body_bbox, domain, half_model, sym_coord):
+    """
+    Box over the expected bow shock region.
 
-    # Load configuration
+    The safety factor is here because arcsin(1/M) is the asymptotic Mach angle
+    of an infinitesimal disturbance. A blunt nose throws a detached, curved bow
+    shock, near normal at the stagnation point, relaxing towards the Mach angle
+    only downstream, so the real envelope is wider everywhere and widest at the
+    nose.
+
+    Be aware what this costs. Filling a whole Mach cone at a shock-resolving
+    size is not affordable at a large domain size: a 250 m by 63 m by 125 m cone
+    at 100 mm comes to roughly 10^10 elements. The budget check below exists
+    because of exactly that error. Either keep the domain tight, refine only a
+    shell around the expected shock position, or leave this off and use
+    solution adaptive refinement in the solver, which is the only approach that
+    does not require knowing where the shock is beforehand.
+    """
+    if not shock_params.get("enable", False):
+        return None
+    mach = shock_params.get("mach_number", 10.0)
+    if mach <= 1.0:
+        print(f"Shock box skipped: mach_number={mach} is not supersonic")
+        return None
+
+    x_inlet, x_outlet, y_lo, y_hi, z_lo, z_hi = domain
+    bx_min, by_min, bz_min, bx_max, by_max, bz_max = body_bbox
+
+    safety = shock_params.get("safety_factor", 2.5)
+    pad = shock_params.get("nose_upstream_pad_mm", 2000.0)
+    mach_angle = math.asin(1.0 / mach)
+    x_nose = bx_min - pad
+    radius = math.tan(mach_angle) * (x_outlet - x_nose) * safety
+
+    box = (
+        max(shock_params.get("XMin", x_nose), x_inlet),
+        min(shock_params.get("XMax", x_outlet), x_outlet),
+        max(shock_params.get("YMin", sym_coord if half_model else -radius), y_lo),
+        min(shock_params.get("YMax", radius), y_hi),
+        max(shock_params.get("ZMin", min(bz_min - radius, -radius)), z_lo),
+        min(shock_params.get("ZMax", max(bz_max + radius, radius)), z_hi),
+    )
+    print(f"Shock box: mach={mach} mach_angle={math.degrees(mach_angle):.2f}deg "
+          f"safety={safety} radius={radius:.0f}mm")
+    return (box,
+            shock_params.get("size_in_mm", 100.0),
+            shock_params.get("transition_thickness_mm", 0.0))
+
+
+def estimate_elements(domain, body_bbox, size_params, boxes, size_min, size_max,
+                      n_samples=200000, seed=0):
+    """
+    Pre-flight element count estimate, before any meshing runs.
+
+    Reimplements the same sizing rules in numpy and Monte Carlo integrates
+    TETS_PER_CUBED_SIZE / h(x)^3 over the domain. Wall distance is approximated
+    as distance to the body bounding box, which understates the true distance
+    and so overstates the count, making the estimate conservative.
+
+    Returns (estimated_elements, domain_volume_m3).
+    """
+    x_inlet, x_outlet, y_lo, y_hi, z_lo, z_hi = domain
+    rng = np.random.default_rng(seed)
+    pts = np.column_stack([
+        rng.uniform(x_inlet, x_outlet, n_samples),
+        rng.uniform(y_lo, y_hi, n_samples),
+        rng.uniform(z_lo, z_hi, n_samples),
+    ])
+
+    lo = np.array(body_bbox[:3])
+    hi = np.array(body_bbox[3:])
+    d = np.linalg.norm(np.maximum(np.maximum(lo - pts, pts - hi), 0.0), axis=1)
+
+    size_near = size_params.get("size_near", 2.0)
+    size_far = size_params.get("size_far", 500.0)
+    dist_min = size_params.get("dist_min", 200.0)
+    dist_max = size_params.get("dist_max", 20000.0)
+
+    t = np.clip((d - dist_min) / max(dist_max - dist_min, 1e-9), 0.0, 1.0)
+    h = size_near + (size_far - size_near) * t
+
+    for box, size_in, _thickness in boxes:
+        xmin, xmax, ymin, ymax, zmin, zmax = box
+        inside = ((pts[:, 0] >= xmin) & (pts[:, 0] <= xmax) &
+                  (pts[:, 1] >= ymin) & (pts[:, 1] <= ymax) &
+                  (pts[:, 2] >= zmin) & (pts[:, 2] <= zmax))
+        h = np.where(inside, np.minimum(h, size_in), h)
+
+    h = np.clip(h, size_min, size_max)
+
+    volume_mm3 = (x_outlet - x_inlet) * (y_hi - y_lo) * (z_hi - z_lo)
+    density = float(np.mean(TETS_PER_CUBED_SIZE / h ** 3))
+    return density * volume_mm3, volume_mm3 / 1e9
+
+
+def report_surface_mesh(wall_faces, body_bbox, nose_params):
+    """
+    Triangle count and edge length range on the wall, split into nose region
+    and rest of body, classified per triangle by centroid.
+
+    Per surface classification does not work here: a BWB is often one large
+    blended surface whose bounding box starts at the nose, which would mark
+    every triangle on the aircraft as nose region. Vectorised, because a Python
+    loop over millions of wall triangles defeats the point of a quick check.
+    """
+    bx_min, _, _, bx_max, _, _ = body_bbox
+    frac = nose_params.get("length_fraction", 0.12)
+    x_nose_end = nose_params.get("XMax", bx_min + frac * (bx_max - bx_min))
+
+    stats = {"nose": [0, np.inf, 0.0], "body": [0, np.inf, 0.0]}
+
+    for surf in wall_faces:
+        try:
+            node_tags, coords, _ = gmsh.model.mesh.getNodes(2, surf, includeBoundary=True)
+            elem_types, _, elem_nodes = gmsh.model.mesh.getElements(2, surf)
+        except Exception:
+            continue
+        if node_tags.size == 0:
+            continue
+
+        tags = np.asarray(node_tags, dtype=np.int64)
+        xyz = np.asarray(coords, dtype=float).reshape(-1, 3)
+        lookup = np.full(int(tags.max()) + 1, -1, dtype=np.int64)
+        lookup[tags] = np.arange(tags.size)
+
+        for etype, enodes in zip(elem_types, elem_nodes):
+            if etype != 2:
+                continue
+            tri = np.asarray(enodes, dtype=np.int64).reshape(-1, 3)
+            tri = tri[tri.max(axis=1) < lookup.size]
+            if tri.size == 0:
+                continue
+            idx = lookup[tri]
+            tri = tri[~(idx < 0).any(axis=1)]
+            if tri.size == 0:
+                continue
+            p = xyz[lookup[tri]]
+
+            e = np.stack([
+                np.linalg.norm(p[:, 0] - p[:, 1], axis=1),
+                np.linalg.norm(p[:, 1] - p[:, 2], axis=1),
+                np.linalg.norm(p[:, 2] - p[:, 0], axis=1),
+            ], axis=1)
+
+            is_nose = p[:, :, 0].mean(axis=1) <= x_nose_end
+            for key, mask in (("nose", is_nose), ("body", ~is_nose)):
+                if not mask.any():
+                    continue
+                sub = e[mask]
+                s = stats[key]
+                s[0] += int(mask.sum())
+                s[1] = min(s[1], float(sub.min()))
+                s[2] = max(s[2], float(sub.max()))
+
+    print("Wall surface mesh report:")
+    for key, label in (("nose", f"nose region (x <= {x_nose_end:.0f}mm)"),
+                       ("body", "rest of body")):
+        count, lo, hi = stats[key]
+        if count:
+            print(f"  {label}: {count} triangles, edges {lo:.3f} to {hi:.3f}mm")
+        else:
+            print(f"  {label}: no triangles")
+    print()
+
+
+def report_quality(threshold):
+    """
+    Worst tet quality and how many cells fall below threshold.
+
+    Slivers are the usual cause of an immediate NaN in the solver, so the claim
+    that optimisation removed them needs checking rather than assuming. Netgen
+    optimisation is present in the official gmsh wheel and was verified to
+    drive illegal tets to zero on a test case, but it is serial, so expect a
+    long single threaded tail on a large mesh.
+    """
+    try:
+        etypes, etags, _ = gmsh.model.mesh.getElements(3)
+    except Exception as e:
+        print(f"Quality check unavailable: {e}\n")
+        return True
+
+    worst = 1.0
+    bad = 0
+    total = 0
+    for _etype, tags in zip(etypes, etags):
+        if len(tags) == 0:
+            continue
+        q = np.asarray(gmsh.model.mesh.getElementQualities(tags, "minSICN"), dtype=float)
+        total += q.size
+        worst = min(worst, float(q.min()))
+        bad += int((q < threshold).sum())
+
+    print(f"Mesh quality: {total} volume elements, worst minSICN={worst:.4f}, "
+          f"{bad} below {threshold}")
+    if bad:
+        print("  Warning: cells below the threshold remain. These are the ones "
+              "that produce a NaN on the first iteration. Consider raising "
+              "Mesh.OptimizeThreshold, or relaxing the near-wall size so the "
+              "gradient into the far field is gentler.")
+    if worst <= 0.0:
+        print("  Error: at least one inverted or zero volume element.")
+        return False
+    print()
+    return True
+
+
+
+def bl_heights(bl_params):
+    """
+    Cumulative layer heights for the prism stack.
+
+    Driven by first cell size and growth ratio, since those are what the
+    physics sets: the first cell resolves the near-wall gradient, the ratio
+    controls how fast the profile is allowed to coarsen. Thickness in the
+    config is honoured as a cap, because a stack taller than the boundary
+    layer buys nothing and collides sooner.
+    """
+    h0 = bl_params.get("Size", 0.05)
+    ratio = bl_params.get("Ratio", 1.1112)
+    n = int(bl_params.get("NbLayers", 36))
+    cap = bl_params.get("Thickness", 0.0)
+
+    heights, acc = [], 0.0
+    for i in range(n):
+        acc += h0 * ratio ** i
+        if cap > 0 and acc > cap:
+            print(f"  Stack capped by Thickness={cap}mm at {len(heights)} "
+                  f"layers instead of {n}.")
+            break
+        heights.append(acc)
+    if not heights:
+        return []
+    print(f"  Prism stack: {len(heights)} layers, first {h0}mm, ratio {ratio}, "
+          f"total {heights[-1]:.3f}mm")
+    return heights
+
+
+
+def group_curves_into_loops(curves):
+    """
+    Group a flat set of curve tags into closed loops by shared end points.
+
+    addCurveLoop needs one loop at a time: handed the curves of two disjoint
+    loops it reports "Curve loop N is wrong". A body can meet the symmetry
+    plane in more than one closed silhouette, so the curves have to be sorted
+    into loops before any of them can be used.
+    """
+    ends = {}
+    for c in curves:
+        pts = tuple(sorted(t for d, t in gmsh.model.getBoundary(
+            [(1, c)], combined=False, oriented=False)))
+        ends[c] = pts
+
+    remaining = set(curves)
+    loops = []
+    while remaining:
+        seed = remaining.pop()
+        loop = [seed]
+        touched = set(ends[seed])
+        grew = True
+        while grew:
+            grew = False
+            for c in list(remaining):
+                if touched & set(ends[c]):
+                    loop.append(c)
+                    touched |= set(ends[c])
+                    remaining.discard(c)
+                    grew = True
+        loops.append(loop)
+    return loops
+
+
+def rebuild_symmetry_plane(sym_outer_curves, strip_outer_curves):
+    """
+    Rebuild the symmetry plane as a surface with the prism strip cut out.
+
+    Where the body meets the symmetry plane, the prism blocks occupy a strip of
+    that plane. The original symmetry face spans the whole cross section, strip
+    included, so meshing it and then extruding gives two surfaces over the same
+    area and generate(3) is handed a self-intersecting boundary.
+
+    The fix is ordering plus a hole: the symmetry face is removed before the
+    surface mesh is built, the layers are extruded, and the plane is then
+    rebuilt from the domain outline with the outer edge of the strip as an
+    interior boundary. The strip itself stays covered by the extrusion's own
+    lateral faces, which carry the symmetry marker.
+
+    Returns the new surface tags.
+    """
+    outer_loops = group_curves_into_loops(sym_outer_curves)
+    hole_loops = group_curves_into_loops(strip_outer_curves)
+    print(f"  Symmetry plane: {len(outer_loops)} outline loop(s), "
+          f"{len(hole_loops)} strip loop(s) to cut out")
+
+    holes = [gmsh.model.geo.addCurveLoop(l, reorient=True) for l in hole_loops]
+    surfaces = []
+    for outline in outer_loops:
+        loop = gmsh.model.geo.addCurveLoop(outline, reorient=True)
+        surfaces.append(gmsh.model.geo.addPlaneSurface([loop] + holes))
+    gmsh.model.geo.synchronize()
+    print(f"  Rebuilt symmetry surface(s): {surfaces}")
+    return surfaces
+
+
+def build_prism_layers(wall_faces, farfield_faces, symmetry_faces, bl_params,
+                       sym_coord, tol, heights=None):
+    """
+    Grow prism layers off the wall, then hand back the surfaces that bound the
+    remaining tet region.
+
+    Uses gmsh.model.geo.extrudeBoundaryLayer, which extrudes an already meshed
+    surface along its mesh normals. This is NOT the BoundaryLayer size field:
+    that field is 2D only and aborts generate(3) with "Only 2D Boundary Layers
+    are supported". Verified on gmsh 4.15.2 that this path produces real
+    prisms and that they survive the .su2 write as element type 13.
+
+    Must be called after generate(2) and before generate(3), since there has to
+    be a wall surface mesh to extrude from.
+
+    Returns (ok, outer_surfaces, bl_volumes, sym_laterals).
+    """
+    if heights is None:
+        heights = bl_heights(bl_params)
+    if not heights:
+        print("  No layers requested, skipping.")
+        return False, [], [], []
+
+    ex = gmsh.model.geo.extrudeBoundaryLayer(
+        [(2, f) for f in wall_faces], [1] * len(heights), heights,
+        bl_params.get("Quads", True))
+    gmsh.model.geo.synchronize()
+
+    # extrude returns, per input surface: (2, top), (3, volume), then the
+    # lateral surfaces. Only the tops bound the outer tet region. Feeding the
+    # lateral quads into the surface loop gives
+    # "non-manifold quad boundaries not supported yet".
+    tops, vols, laterals = [], [], []
+    for i, (dim, tag) in enumerate(ex):
+        if dim == 3:
+            vols.append(tag)
+        elif dim == 2:
+            if i + 1 < len(ex) and ex[i + 1][0] == 3:
+                tops.append(tag)
+            else:
+                laterals.append(tag)
+
+    # A lateral shared by two neighbouring blocks appears twice in the return
+    # and is internal. One appearing once sits on the open edge of the wall
+    # patch set, which on a half model is the symmetry plane. This is a
+    # topological test: the laterals have no mesh yet, so their coordinates
+    # cannot be queried here.
+    seen = {}
+    for tag in laterals:
+        seen[tag] = seen.get(tag, 0) + 1
+    exterior = [tag for tag, n in seen.items() if n == 1]
+
+    print(f"  Extruded {len(wall_faces)} wall face(s) into {len(vols)} prism "
+          f"block(s): {len(tops)} tops, {len(seen)} laterals "
+          f"({len(exterior)} exterior)")
+
+    sym_laterals = exterior if symmetry_faces else []
+    if sym_laterals:
+        print(f"  {len(sym_laterals)} lateral face(s) lie in the symmetry "
+              "plane and take the symmetry marker.")
+
+    # Outer edge of the symmetry strip: curves used once across the exterior
+    # laterals and not part of the original wall boundary. This is the hole the
+    # rebuilt symmetry plane is cut around.
+    strip_curves = []
+    if sym_laterals:
+        wall_edges = set(t for d, t in gmsh.model.getBoundary(
+            [(2, f) for f in wall_faces], combined=False, oriented=False))
+        counts = {}
+        for tag in sym_laterals:
+            for d, c in gmsh.model.getBoundary([(2, tag)], combined=False,
+                                               oriented=False):
+                counts[c] = counts.get(c, 0) + 1
+        strip_curves = [c for c, n in counts.items()
+                        if n == 1 and c not in wall_edges]
+        print(f"  Strip outer edge: {len(strip_curves)} curve(s)")
+
+    return True, tops + farfield_faces, vols, sym_laterals, strip_curves
+
+
+def report_quality_mixed(threshold):
+    """
+    Quality report that separates prisms from tets.
+
+    An isotropic metric is the wrong test for a viscous prism: a 1000:1 aspect
+    ratio cell is meant to be sliver shaped and scores near zero on minSICN by
+    construction. Aborting on that rejects every valid boundary layer mesh.
+    What actually matters for a prism is that its volume is positive, so the
+    threshold is applied to tets only and prisms are checked for inversion.
+    """
+    try:
+        etypes, etags, _ = gmsh.model.mesh.getElements(3)
+    except Exception as e:
+        print(f"Quality check unavailable: {e}\n")
+        return True
+
+    stats = {}
+    inverted = 0
+    for etype, tags in zip(etypes, etags):
+        if len(tags) == 0:
+            continue
+        q = np.asarray(gmsh.model.mesh.getElementQualities(tags, "minSICN"),
+                       dtype=float)
+        name = {4: "tet", 5: "hex", 6: "prism", 7: "pyramid"}.get(etype, str(etype))
+        prev = stats.get(name, [0, 1.0, 0])
+        bad = int((q < threshold).sum()) if name == "tet" else 0
+        stats[name] = [prev[0] + q.size, min(prev[1], float(q.min())),
+                       prev[2] + bad]
+        inverted += int((q <= 0.0).sum())
+
+    print("Mesh quality by element type:")
+    for name, (count, worst, bad) in sorted(stats.items()):
+        line = f"  {name}: {count} cells, worst minSICN={worst:.4f}"
+        if name == "tet":
+            line += f", {bad} below {threshold}"
+        else:
+            line += "  (threshold not applied: anisotropic by design)"
+        print(line)
+
+    if inverted:
+        print(f"  Error: {inverted} inverted or zero volume element(s). On a "
+              "prism mesh this usually means the layers collided, at a sharp "
+              "trailing edge or in a concave junction. Reduce NbLayers or "
+              "Thickness, or coarsen the wall mesh there.")
+        return False
+
+    tet_bad = stats.get("tet", [0, 1.0, 0])[2]
+    if tet_bad:
+        print("  Warning: poor tets remain. These are the ones that produce a "
+              "NaN on the first iteration.")
+    print()
+    return True
+
+
+def create_mesh(config_file='gmsh_config.json', dry_run=False):
     config = load_config(config_file)
     if config is None:
         return False
 
-    # Extract file paths
+    dry_run = dry_run or config.get('utility_parameters', {}).get('dry_run', False)
+    if dry_run:
+        print("DRY RUN: will build the surface mesh and prism layers (if "
+              "enabled) to get real counts, then stop before the 3D tet fill "
+              "and export. No .msh or .su2 written.\n")
+
     step_file = config.get('step_file')
     output_path = config.get('output_file')
     export_geometry_path = config.get('export_geometry_path')
-    
-    print(f"File {step_file} opened.\nOutput: {output_path}\n")
 
-    # Extract gmsh parameters
     gmsh_params = config.get('gmsh_parameters', {})
     size_params = config.get('size_field_parameters', {})
-    # Geometry-scale parameters (rotation, far-field box sizing, thin-feature
-    # thresholds) - kept out of code so a new design/orientation/domain size
-    # never requires editing this script, only the config file.
     geom_params = config.get('geometry_parameters', {})
     util_params = config.get('utility_parameters', {})
+    bl_params = config.get('boundary_layer_parameters', {})
+    shock_params = config.get('shock_box_parameters', {})
+    nose_params = config.get('nose_refinement_parameters', {})
+    marker_names = config.get('su2_marker_names', {})
 
-    inlet_faces = []
-    outlet_faces = []
-    atmosphere_faces = []
-    solid_walls_faces = []
-    # ========================================================================
-    # 1. INITIALIZE
-    # ========================================================================
-    print("Step 1: Initializing Gmsh...")
+    wall_name = marker_names.get("wall", "wall")
+    sym_name = marker_names.get("symmetry", "symmetry")
+    farfield_name = marker_names.get("farfield", "farfield")
+
+    farfield_faces, symmetry_faces = [], []
+
+    # 1. Initialize
     gmsh.initialize()
+    print(f"gmsh {gmsh.__version__}")
+    print(f"Input: {step_file}\nOutput: {output_path}\n")
     gmsh.option.setNumber("Mesh.RandomFactor", gmsh_params.get("Mesh.RandomFactor", 1e-5))
     gmsh.option.setNumber("General.NumThreads", gmsh_params.get("General.NumThreads", 16))
     gmsh.model.add("BWB_Spaceplane_Mesh")
-    print("[OK] Gmsh initialized\n")
 
-    # ========================================================================
-    # 2. IMPORT GEOMETRY
-    # ========================================================================
-    print("Step 2: Importing STEP geometry...")
-
+    # 2. Import geometry
     if not os.path.exists(step_file):
-        print(f"[ERROR] Error: File not found: {step_file}")
+        print(f"File not found: {step_file}")
         gmsh.finalize()
         return False
-
     try:
-        spaceplane_shapes = gmsh.model.occ.importShapes(step_file)
+        shapes = gmsh.model.occ.importShapes(step_file)
         gmsh.model.occ.synchronize()
-        print("[OK] STEP file imported\n")
     except Exception as e:
-        print(f"[ERROR] Failed to import STEP: {e}")
+        print(f"Geometry import failed: {e}")
         gmsh.finalize()
         return False
 
-    # ========================================================================
-    # 2a. CONVERT UNITS: STEP FILE IS IN METRES, REST OF THIS SCRIPT ASSUMES MM
-    # ========================================================================
-    # All downstream thresholds, sizes, and config values (thin-feature
-    # guards, size-field distances, boundary-layer thickness, far-field box
-    # dimensions, etc.) are written and interpreted in millimetres. The
-    # incoming STEP geometry is in metres, so without this conversion every
-    # one of those mm-scale constants would be applied to a model that is
-    # 1000x smaller than intended (e.g. a 1mm thin-feature threshold would
-    # end up 1000x larger than the entire spaceplane). Scaling right after
-    # import, before rotation or any boolean operation, keeps every later
-    # step - including exportStepFile() and all interim STEP exports -
-    # unchanged and working purely in mm from this point on.
-    # print("Step 2a: Converting imported geometry from metres to millimetres...")
-    try:
-        dilation_factor = geom_params.get('uniform_dilation_factor', 1)
-        if dilation_factor != 1.0:
-            print(f"  Scaling geometry by {dilation_factor}x (m -> mm)")
-            gmsh.model.occ.dilate(spaceplane_shapes, 0, 0, 0, dilation_factor, dilation_factor, dilation_factor)
+    dilation = geom_params.get('uniform_dilation_factor', 1.0)
+    if dilation != 1.0:
+        try:
+            gmsh.model.occ.dilate(shapes, 0, 0, 0, dilation, dilation, dilation)
             gmsh.model.occ.synchronize()
-            print(f"[OK] Geometry scaled by {dilation_factor}x (m -> mm, maybe?)\n")
-        else:
-            print("  No scaling applied (uniform_dilation_factor=1 in config)\n")
-    except Exception as e:
-        print(f"[ERROR] Failed to scale geometry to mm: {e}")
-        gmsh.finalize()
-        return False
-
-    # ========================================================================
-    # 3. EXTRACT SPACEPLANE VOLUME
-    # ========================================================================
-    print("Step 3: Extracting spaceplane volume...")
-    spaceplane_vols = [item for item in spaceplane_shapes if item[0] == 3]
-
-    if not spaceplane_vols:
-        print("[ERROR] Error: Could not find 3D volume in STEP file")
-        gmsh.finalize()
-        return False
-
-    spaceplane_tag = spaceplane_vols[0][1]
-    print(f"[OK] Spaceplane volume tag: {spaceplane_tag}\n")
-
-    # ========================================================================
-    # 4. ROTATE SPACEPLANE
-    # ========================================================================
-    rotation_angle_deg = geom_params.get("rotation_angle_deg", -5.0)
-    rotation_byCoM = geom_params.get("rotation_by_CoM", True)
-    if rotation_angle_deg != 0.0:
-
-        print(f"Step 4: Rotating spaceplane ({rotation_angle_deg} deg around Y-axis)...")
-        if rotation_byCoM:
-            com_body = gmsh.model.occ.getCenterOfMass(3, spaceplane_tag)
-            print(f"  Center of Mass of Spaceplane: ({com_body[0]:.2f}, {com_body[1]:.2f}, {com_body[2]:.2f})")
-        else:
-            com_body = (0.0, 0.0, 0.0)
-            print(f"  Using origin as rotation point: ({com_body[0]:.2f}, {com_body[1]:.2f}, {com_body[2]:.2f})")
-        angle_rad = rotation_angle_deg * math.pi / 180.0
-        gmsh.model.occ.rotate([(3, spaceplane_tag)], com_body[0], com_body[1], com_body[2], 0, 1, 0, angle_rad)
-        gmsh.model.occ.synchronize()
-        
-        if geom_params.get("test_for_CoM_only", False):
-            new_com = gmsh.model.occ.getCenterOfMass(3, spaceplane_tag)
-            print(f"  New Center of Mass after rotation: ({new_com[0]:.2f}, {new_com[1]:.2f}, {new_com[2]:.2f})")
+            print(f"Geometry scaled {dilation}x\n")
+        except Exception as e:
+            print(f"Geometry scaling failed: {e}")
             gmsh.finalize()
-            return True  # Exit early if only testing CoM rotation
+            return False
 
-        exportStepFile(export_geometry_path + ".1.step",'')
+    vols = [item for item in shapes if item[0] == 3]
+    if not vols:
+        print("No 3D volume found in geometry file")
+        gmsh.finalize()
+        return False
+    body_tag = vols[0][1]
 
-        print("[OK] Spaceplane rotated\n")
-    else:
-        print("Step 4: No rotation applied (rotation_angle_deg=0 in config)\n")
+    # 3. Rotate for angle of attack, about Y, the symmetry plane normal, so the
+    # body stays symmetric and the half model cut remains valid.
+    angle_deg = geom_params.get("rotation_angle_deg", -5.0)
+    if angle_deg != 0.0:
+        if geom_params.get("rotation_by_CoM", False):
+            origin = gmsh.model.occ.getCenterOfMass(3, body_tag)
+        else:
+            origin = (0.0, 0.0, 0.0)
+        gmsh.model.occ.rotate([(3, body_tag)], origin[0], origin[1], origin[2],
+                              0, 1, 0, angle_deg * math.pi / 180.0)
+        gmsh.model.occ.synchronize()
+        if geom_params.get("test_for_CoM_only", False):
+            print(f"CoM after rotation: {gmsh.model.occ.getCenterOfMass(3, body_tag)}")
+            gmsh.finalize()
+            return True
+        if export_geometry_path:
+            export_step(export_geometry_path + ".1.step")
+        print(f"Rotated {angle_deg} deg about Y\n")
 
-    boundary_entities = gmsh.model.getBoundary([(3, spaceplane_tag)], combined=False, oriented=False)
-    spaceplane_faces = [tag for dim, tag in boundary_entities if dim == 2]
+    body_bbox = gmsh.model.getBoundingBox(3, body_tag)
+    body_length = body_bbox[3] - body_bbox[0]
+    print(f"Body bbox: X=[{body_bbox[0]:.0f},{body_bbox[3]:.0f}] "
+          f"Y=[{body_bbox[1]:.0f},{body_bbox[4]:.0f}] "
+          f"Z=[{body_bbox[2]:.0f},{body_bbox[5]:.0f}], length={body_length:.0f}mm\n")
 
-    print("\n" + "=" * 80)
-    print(f"GEOMETRY ANALYSIS: {len(spaceplane_faces)} SURFACES DETECTED")
-    print("=" * 80)
-    print(f"Raw Face Tags: {sorted(spaceplane_faces)}\n")
+    # 4. Far-field domain, half model when symmetry is enabled
+    half_model = geom_params.get("enable_symmetry_half_model", True)
+    sym_coord = geom_params.get("symmetry_plane_y_mm", 0.0)
+    keep_positive = geom_params.get("symmetry_keep_positive_side", True)
 
-    print(f"{'Index':<6} | {'Tag':<5} | {'Center of Mass (X, Y, Z)':<32} | {'Dimensions (delta-X x delta-Y x delta-Z)':<28}")
-    print("-" * 80)
-
-    for idx, tag in enumerate(sorted(spaceplane_faces), start=1):
-        xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(2, tag)
-        com = gmsh.model.occ.getCenterOfMass(2, tag)
-        dx = xmax - xmin
-        dy = ymax - ymin
-        dz = zmax - zmin
-        com_str = f"({com[0]:.2f}, {com[1]:.2f}, {com[2]:.2f})"
-        dim_str = f"{dx:.2f} x {dy:.2f} x {dz:.2f}"
-        print(f"#{idx:<5} | {tag:<5} | {com_str:<32} | {dim_str:<28}")
-        print(f"       - Span Limits: X=[{xmin:.1f} -> {xmax:.1f}], Y=[{ymin:.1f} -> {ymax:.1f}], Z=[{zmin:.1f} -> {zmax:.1f}]")
-        print("-" * 80)
-
-    # ========================================================================
-    # 4a. ENFORCE MINIMUM THICKNESS ON THIN FEATURES - BEFORE THE BOOLEAN CUT
-    # ========================================================================
-    # Gated behind enable_thin_feature_enforcement (config, default True) so
-    # a new/changed design can be test-meshed on its RAW imported geometry -
-    # no extrusion, no fragment(), no healShapes() - before deciding whether
-    # this machinery is even needed for it. All of Step 4a/4b's thickening
-    # and sealing was built around specific thin-feature failures on a prior
-    # design; a new design's thin features (if any) may be different or
-    # absent, so trying to pad/seal it blind, before ever seeing how it
-    # meshes untouched, risks fighting problems that don't exist for this
-    # geometry and obscuring ones that do. Disabled here just sets
-    # spaceplane_tags = [spaceplane_tag] and skips straight to Step 5.
-    enable_thin_feature_enforcement = False #geom_params.get("enable_thin_feature_enforcement", False)
-    print("Step 4a: SKIPPED (enable_thin_feature_enforcement=false in config) - "
-          "using the spaceplane's raw imported geometry, unmodified.\n")
-    spaceplane_tags = [spaceplane_tag]
-
-
-    # ========================================================================
-    # 5. CREATE FAR-FIELD DOMAIN (cuboid, NOT a cone)
-    # ========================================================================
-    # Switched from a conical far-field domain to a cuboid after five
-    # independently-verified geometric/topological/parametric properties
-    # of the cone construction were all confirmed correct, yet the mesher
-    # failed identically every time:
-    #   1. Periodicity (duplicate curve tags, u=2*pi) - checked twice, both
-    #      clean.
-    #   2. Degenerate/near-zero-length edges - chord distances confirmed
-    #      exact to 10 decimal places against design intent.
-    #   3. Mesh size vs. gap size (MeshSizeMax/size_far vs gap chord) -
-    #      widening the gap 4x had zero effect on the failure.
-    #   4. Mesh.MeshSizeFromCurvature interaction - setting to 0 had zero
-    #      effect, byte-identical failure numbers.
-    #   5. Parametric (u,v) trim consistency between boundary curves -
-    #      directly queried via gmsh, found perfectly consistent (used
-    #      u-span exactly equals the surface's own domain span).
-    #
-    # With every specific hypothesis eliminated by direct evidence, the
-    # most likely remaining explanation is a gmsh Frontal-Delaunay
-    # algorithm limitation with this class of surface (bounded by two
-    # full-sweep circular arcs plus two constant-u line edges), independent
-    # of the exact numbers involved. A cuboid domain has ONLY flat planar
-    # faces and straight-line edges - none of the curved/circular/conical
-    # geometry that any of the five failure modes above could apply to, so
-    # this removes the entire failure class structurally rather than
-    # continuing to patch around it.
-    #
-    # This is a physics trade-off, not a shortcut: the case is hypersonic,
-    # where the conical domain was a genuine, deliberate approximation of
-    # the Mach cone / zone of dependence - not an arbitrary shape choice.
-    # A box can't taper the way a frustum does, so it is sized here to
-    # fully ENVELOPE the original cone at every cross-section (using the
-    # cone's largest radius, at the outlet, uniformly along the entire
-    # length), guaranteeing it can't clip any flow feature the conical
-    # domain was sized to capture. The trade is more far-field cells for
-    # a structurally simpler, reliable domain - not a compromise in what
-    # the domain actually contains.
-    print("Step 5: Creating cuboid far-field domain...")
-
-    # All far-field box dimensions come from config (geometry_parameters) -
-    # sized to fully envelope the original cone (see design rationale
-    # above); resizing the domain never requires editing this script.
     x0 = geom_params.get("far_field_x0_mm", -50000.0)
     length = geom_params.get("far_field_length_mm", 200000.0)
-    r_envelope = geom_params.get("far_field_r_envelope_mm", 100000.0)  # cone's largest radius (at the outlet)
+    r_envelope = geom_params.get("far_field_r_envelope_mm", 100000.0)
 
-    box_tag = gmsh.model.occ.addBox(
-        x0, -r_envelope, -r_envelope,
-        length, 2 * r_envelope, 2 * r_envelope
-    )
-    gmsh.model.occ.synchronize()
-    exportStepFile(export_geometry_path + ".2.step",'')
-
-    # Same tag-collision guard as before, retained as a cheap sanity check
-    # even though addBox is far less likely to produce this than the prior
-    # revolve+heal construction did. Uses the overall bounding box of ALL
-    # spaceplane volumes (spaceplane_tags may be >1 after Step 4a/4b
-    # thickening and sealing), since a same-bbox collision would show up in
-    # the combined extent either way.
-    xmin_c, ymin_c, zmin_c, xmax_c, ymax_c, zmax_c = gmsh.model.getBoundingBox(3,     box_tag)
-    spaceplane_bboxes = [gmsh.model.getBoundingBox(3, t) for t in spaceplane_tags]
-    xmin_s = min(b[0] for b in spaceplane_bboxes)
-    ymin_s = min(b[1] for b in spaceplane_bboxes)
-    zmin_s = min(b[2] for b in spaceplane_bboxes)
-    xmax_s = max(b[3] for b in spaceplane_bboxes)
-    ymax_s = max(b[4] for b in spaceplane_bboxes)
-    zmax_s = max(b[5] for b in spaceplane_bboxes)
-    same_bbox = (
-        abs(xmin_c - xmin_s) < 1e-3 and abs(xmax_c - xmax_s) < 1e-3 and
-        abs(ymin_c - ymin_s) < 1e-3 and abs(ymax_c - ymax_s) < 1e-3 and
-        abs(zmin_c - zmin_s) < 1e-3 and abs(zmax_c - zmax_s) < 1e-3
-    )
-    if box_tag in spaceplane_tags or same_bbox:
-        print(f"[ERROR] the far-field volume (tag {box_tag}) is the same as, or has the")
-        print(f"  same bounding box as, the spaceplane volume(s) {spaceplane_tags}.")
-        print(f"  Cuboid bbox:     X=[{xmin_c:.1f},{xmax_c:.1f}] Y=[{ymin_c:.1f},{ymax_c:.1f}] Z=[{zmin_c:.1f},{zmax_c:.1f}]")
-        print(f"  Spaceplane bbox: X=[{xmin_s:.1f},{xmax_s:.1f}] Y=[{ymin_s:.1f},{ymax_s:.1f}] Z=[{zmin_s:.1f},{zmax_s:.1f}]")
-        gmsh.finalize()
-        return False
-
-    print(f"[OK] Far-field volume confirmed, tag: {box_tag}")
-    print(f"  Bounding box: X=[{xmin_c:.1f},{xmax_c:.1f}] Y=[{ymin_c:.1f},{ymax_c:.1f}] Z=[{zmin_c:.1f},{zmax_c:.1f}]")
-    print(f"  Fully envelopes the original cone (outlet radius {r_envelope:.0f}mm used uniformly)")
-    print(f"  Distinct from spaceplane (tag(s) {spaceplane_tags}). No curved surfaces - flat")
-    print(f"  planar faces only, structurally immune to every failure mode found on the cuboid construction.\n")
-
-    # ========================================================================
-    # 5a. SNAPSHOT COPY OF THE SPACEPLANE FOR VISUAL INSPECTION
-    # ========================================================================
-    # The boolean cut in Step 6 below runs with removeTool=True, which
-    # DELETES the spaceplane solid(s) - only the cavity they leave behind
-    # in the fluid domain survives. That cavity is a valid, correct
-    # boolean result, but it is an internal VOID inside an otherwise closed
-    # box: opening the Step 6b pre-mesh export in a STEP viewer shows what
-    # looks like an empty box, because the aircraft shape only exists as a
-    # hidden internal shell, not a solid you can see without a section cut.
-    # This is exactly the "interim STEP doesn't contain the spaceplane"
-    # symptom.
-    #
-    # Fix: take a throwaway OCC copy of the (already thickened/sealed)
-    # spaceplane BEFORE the cut consumes the originals, purely so Step 6b
-    # can write it out alongside the fluid domain as a real, visible solid
-    # for inspection. It is deleted again right after export (Step 6b,
-    # still before Step 7 builds any physical groups - see Step 6b's own
-    # comment for why that ordering matters) so it can never reach Step 11
-    # mesh generation as a stray, un-meshed volume.
-    #spaceplane_inspection_copy = gmsh.model.occ.copy([(3, t) for t in spaceplane_tags])
-    #gmsh.model.occ.synchronize()
-    #spaceplane_inspection_tags = [tag for dim, tag in spaceplane_inspection_copy if dim == 3]
-
-    # ========================================================================
-    # ========================================================================
-    # 6. BOOLEAN CUT
-    # ========================================================================
-    # Cuts the (already-thickened, from Step 4a/4b) spaceplane solid(s) out
-    # of the cuboid. spaceplane_tags is a list because thickening/sealing
-    # may have fragmented the spaceplane into more than one conformally-glued
-    # volume - all of them are passed as cut tools so every piece is
-    # subtracted, leaving one clean cavity wall with no post-cut geometry
-    # surgery required.
-    print("Step 6: Cutting spaceplane from cuboid (fluid domain)...")
-    try:
-        fluid_domain, _ = gmsh.model.occ.cut(
-            [(3, box_tag)],
-            [(3, t) for t in spaceplane_tags],
-            removeObject=True, removeTool=True
-        )
-        gmsh.model.occ.synchronize()
-        fluid_volume_tags = [tag for dim, tag in fluid_domain if dim == 3]
-        print(f"[OK] Boolean cut complete, fluid volume(s): {fluid_volume_tags}\n")
-        exportStepFile(export_geometry_path + ".3.step",'')
-
-        # ====================================================================
-        # 6a. REMOVE DUPLICATE/COINCIDENT FACES BEFORE MESHING
-        # ====================================================================
-        # The per-surface thickening in Step 4a extrudes and fragments each
-        # thin feature independently. When two thickened features are
-        # geometrically adjacent (e.g. two thin panels sharing an edge),
-        # their newly-created side faces can end up exactly coincident -
-        # two distinct 2D entities occupying the same location. Gmsh's
-        # mesher does not merge these on its own; left in place, HXT's 3D
-        # meshing step fails with "Found two exactly self-intersecting
-        # facets" once it hits the duplicate pair (confirmed on real
-        # geometry: surfaces with identical vertex triples, traced back to
-        # newly-created faces from the Step 4a thickening of two adjacent
-        # thin panels).
-        #
-        # gmsh.model.occ.removeAllDuplicates() merges/removes exactly this
-        # class of overlapping entity. It is run here - AFTER the boolean
-        # cut has fully assembled the fluid domain, but BEFORE Step 7
-        # collects surface tags for physical groups - because (a) it needs
-        # the complete, final topology to find duplicates correctly, and
-        # (b) like fragment(), it can renumber entity tags, so anything
-        # that reads tags from it must do so AFTER this call, never before.
-        # Running it before physical groups exist avoids stale-tag issues
-        # entirely, the same lesson learned from the Step 4a fragment bug.
-        print("Step 6a: Removing duplicate/coincident faces before meshing...")
-        surfaces_before = gmsh.model.getEntities(2)
-        volumes_before = gmsh.model.getEntities(3)
-        try:
-            #gmsh.model.occ.removeAllDuplicates()
-            gmsh.model.occ.synchronize()
-            surfaces_after = gmsh.model.getEntities(2)
-            volumes_after = gmsh.model.getEntities(3)
-            n_surf_removed = len(surfaces_before) - len(surfaces_after)
-            n_vol_changed = len(volumes_before) - len(volumes_after)
-            if n_surf_removed > 0:
-                print(f"  [OK] Removed {n_surf_removed} duplicate/coincident surface(s) "
-                      f"({len(surfaces_before)} -> {len(surfaces_after)})")
-            else:
-                print(f"  [OK] No duplicate surfaces found ({len(surfaces_after)} surfaces "
-                      f"unchanged)")
-            if n_vol_changed != 0:
-                print(f"  [WARNING] Volume count changed during duplicate removal "
-                      f"({len(volumes_before)} -> {len(volumes_after)}) - re-resolving "
-                      f"fluid_volume_tags from current model state")
-            # removeAllDuplicates() can renumber volume tags even when the
-            # count is unchanged, so always re-resolve from the live model
-            # rather than trusting the pre-call fluid_volume_tags list.
-            fluid_volume_tags = [tag for dim, tag in gmsh.model.getEntities(3)]
-            print(f"  Fluid domain now spans volume(s): {fluid_volume_tags}\n")
-        except Exception as e:
-            # Some gmsh versions raise if there is nothing to remove -
-            # this is not a failure of the geometry, just means it was
-            # already clean. Re-resolve tags defensively either way since
-            # we cannot be certain what state the call left things in.
-            print(f"  [INFO] removeAllDuplicates() reported: {e}")
-            print(f"  (this can happen when there is nothing to remove on some gmsh "
-                  f"versions - not necessarily an error)")
-            fluid_volume_tags = [tag for dim, tag in gmsh.model.getEntities(3)]
-            print(f"  Fluid domain spans volume(s): {fluid_volume_tags}\n")
-
-        # ====================================================================
-        # 6b. EXPORT PRE-MESH GEOMETRY FOR INSPECTION, THEN REMOVE THE
-        #     INSPECTION COPY - BOTH BEFORE PHYSICAL GROUPS ARE CREATED
-        # ====================================================================
-        # Exports the current OCC geometry - after STEP import, rotation,
-        # far-field box creation, boolean cut, and thickness enforcement,
-        # but BEFORE any mesh sizing or mesh generation - as a STEP file.
-        # This lets the cuts and thickened features be visually inspected in
-        # SALOME (or any STEP viewer) before committing to a mesh.
-        # Controlled by config so it does not run unless explicitly
-        # requested.
-        #
-        # The model still contains the spaceplane_inspection_copy made in
-        # Step 5a, so this export includes it as a real, visible solid
-        # alongside the fluid domain - not just as the domain's hidden
-        # internal cavity shell (the "STEP doesn't contain the spaceplane"
-        # symptom that copy fixes).
-        #
-        # CRITICAL ORDERING - this block, including the inspection copy's
-        # removal, MUST run entirely BEFORE Step 7 creates physical groups.
-        # A real run hit exactly the failure this avoids: the export+remove
-        # here used to run AFTER Step 7 (as the old "Step 8a"). Removing
-        # the inspection copy volumes is a boolean/OCC operation just like
-        # fragment() or removeAllDuplicates() - it renumbers surviving
-        # entities on synchronize(). With physical groups already built
-        # from the pre-removal tags, that renumbering silently invalidated
-        # them: Step 10 then failed to find surfaces it had just listed
-        # ("Unknown model face with tag 83", etc.) and 3D meshing produced
-        # a real, large mesh (31,027,765 elements) that gmsh.write()
-        # exported as a ~10KB file - because Mesh.SaveAll defaults to 0,
-        # so gmsh.write() only exports entities that belong to a STILL-VALID
-        # physical group, and the volume physical group no longer matched
-        # anything real. Doing the copy's removal here, before Step 7 reads
-        # or assigns any tag, means every physical group Step 7 creates is
-        # built from the model's FINAL, stable numbering - no operation
-        # that can renumber entities runs after this point until meshing.
-        
-        #exportStepFile(export_geometry_path, spaceplane_inspection_tags)
-
-        # Filter to tags that actually still exist before calling remove() -
-        # gmsh.model.occ.copy() on multiple input solids can itself produce
-        # fewer distinct output volumes than requested when inputs share
-        # coincident geometry (confirmed on real geometry: 2 of 9 requested
-        # copy tags never existed). Filtering avoids the "Unknown
-        # OpenCASCADE entity" warning entirely instead of relying on
-        # remove()'s own tolerance for a partially-invalid list.
-        existing_3d_tags = {tag for dim, tag in gmsh.model.getEntities(3)}
-        #inspection_tags_to_remove = [t for t in spaceplane_inspection_tags if t in existing_3d_tags]
-        #if inspection_tags_to_remove:
-        #    gmsh.model.occ.remove([(3, t) for t in inspection_tags_to_remove], recursive=True)
-        #    gmsh.model.occ.synchronize()
-        #    print(f"  [OK] Removed spaceplane inspection copy (volume(s) "
-        #          f"{inspection_tags_to_remove}) - not part of the fluid mesh")
-
-        # The removal above can renumber the REAL fluid-domain volumes too
-        # (same lesson as removeAllDuplicates() above) - re-resolve from the
-        # live model rather than trusting the pre-removal fluid_volume_tags,
-        # so every downstream step (starting with Step 7 next) reads only
-        # tags that are guaranteed to still be valid.
-        fluid_volume_tags = [tag for dim, tag in gmsh.model.getEntities(3)]
-        print(f"  Fluid domain now spans volume(s): {fluid_volume_tags}\n")
-
-        # ====================================================================
-        # Robust Surface Detection Logic
-        # ====================================================================
-        print("Step 7: Creating physical groups from surfaces and volumes...")
-        all_fluid_faces = []
-        for vtag in fluid_volume_tags:
-            boundary_faces = gmsh.model.getBoundary([(3, vtag)], combined=False, oriented=False)
-            all_fluid_faces.extend(tag for dim, tag in boundary_faces)
-        # A face can appear as boundary of more than one fragment-glued
-        # volume only if it's an internal interface between them (e.g. the
-        # thickened slab's shared face with the original fluid region) -
-        # de-duplicate so it isn't double-counted or double-assigned.
-        all_fluid_faces = list(set(all_fluid_faces))
-
-        # Far-field box bounds (must match Step 5's box construction
-        # exactly - x0, length, r_envelope are defined there).
-        x_inlet = x0
-        x_outlet = x0 + length
-        y_min_bound, y_max_bound = -r_envelope, r_envelope
-        z_min_bound, z_max_bound = -r_envelope, r_envelope
-        # mm; generous vs. the old 0.01-0.2mm centroid tolerance, since this
-        # now compares each face's own bounding-box extent against a box
-        # plane position, not requiring the face's centroid to happen to
-        # sit at (y=0,z=0). Sourced from config, not hardcoded.
-        tol = geom_params.get("far_field_face_tolerance_mm", 0.5)
-
-        for face in all_fluid_faces:
-            fxmin, fymin, fzmin, fxmax, fymax, fzmax = gmsh.model.getBoundingBox(2, face)
-
-            # A far-field box face is planar AND flush against one of the
-            # six box bounds across its ENTIRE extent (both min and max on
-            # that axis sit at the bound). This is what actually
-            # identifies "this IS a box wall" - the previous version only
-            # checked whether a face's centroid happened to be near
-            # (y=0, z=0), which is true for essentially none of the six
-            # box faces (their centroids sit at y=+/-100000 or
-            # z=+/-100000), so every box face that failed that check fell
-            # through to Solid_Walls by elimination - corrupting the wall
-            # group (and therefore the boundary-layer field built from it)
-            # with far-field geometry instead of just the spaceplane.
-            is_inlet = abs(fxmin - x_inlet) < tol and abs(fxmax - x_inlet) < tol
-            is_outlet = abs(fxmin - x_outlet) < tol and abs(fxmax - x_outlet) < tol
-            is_ymin = abs(fymin - y_min_bound) < tol and abs(fymax - y_min_bound) < tol
-            is_ymax = abs(fymin - y_max_bound) < tol and abs(fymax - y_max_bound) < tol
-            is_zmin = abs(fzmin - z_min_bound) < tol and abs(fzmax - z_min_bound) < tol
-            is_zmax = abs(fzmin - z_max_bound) < tol and abs(fzmax - z_max_bound) < tol
-
-            if is_inlet:
-                inlet_faces.append(face)
-            elif is_outlet:
-                outlet_faces.append(face)
-            elif is_ymin or is_ymax or is_zmin or is_zmax:
-                atmosphere_faces.append(face)
-            # else: not a far-field box face -> falls through to
-            # solid_walls_faces below. This is now correct because
-            # far-field faces are positively identified above, rather
-            # than Solid_Walls being defined as "whatever wasn't near
-            # (0,0)".
-
-        if inlet_faces:
-            gmsh.model.addPhysicalGroup(2, inlet_faces, name="Inlet")
-        if outlet_faces:
-            gmsh.model.addPhysicalGroup(2, outlet_faces, name="Outlet")
-        if atmosphere_faces:
-            gmsh.model.addPhysicalGroup(2, atmosphere_faces, name="Atmosphere")
-        far_field_faces = set(inlet_faces + outlet_faces + atmosphere_faces)
-        solid_walls_faces = list(set(all_fluid_faces) - far_field_faces)
-        gmsh.model.addPhysicalGroup(2, solid_walls_faces, name="Solid_Walls")
-        gmsh.model.addPhysicalGroup(3, fluid_volume_tags, 7, "Group_Of_All_Volumes")
-        print("[OK] Physical groups created\n")
-
-    except Exception as e:
-        print(f"[ERROR] Boolean operation failed: {e}")
-        gmsh.finalize()
-        return False
-
-    # ========================================================================
-    # 8. BOUNDARY FACE ASSIGNMENT (unchanged verification block)
-    # ========================================================================
-    print("Step 8: Verifying boundary face assignments...")
-    print(f"Solid walls: {solid_walls_faces}")
-    print(f"Inlet: {inlet_faces}")
-    print(f"Outlet: {outlet_faces}")
-    print(f"Atmosphere: {atmosphere_faces}\n")
-
-    surfaces = gmsh.model.getEntities(2)
-    model_surface_tags = [tag for dim, tag in surfaces]
-
-    print(f"Total surfaces in model: {len(model_surface_tags)}")
-    print(f"All surface tags: {sorted(model_surface_tags)}\n")
-
-    all_assigned = inlet_faces + outlet_faces + atmosphere_faces + solid_walls_faces
-    unassigned = [t for t in model_surface_tags if t not in all_assigned]
-
-    if unassigned:
-        print("[WARNING]  UNASSIGNED SURFACES (adding to Solid_Walls automatically):")
-        print("-" * 50)
-        for tag in sorted(unassigned):
-            xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(2, tag)
-            size = max(xmax - xmin, ymax - ymin, zmax - zmin)
-            print(f"    Tag {tag:2d}: Size={size:7.2f}")
-        # Any surface not caught by inlet/outlet/atmosphere logic (e.g. from
-        # sliver removal side effects) is real geometry -> treat as solid wall
-        # so it is neither lost nor left out of the size field.
-        solid_walls_faces = list(set(solid_walls_faces + unassigned))
-        gmsh.model.removePhysicalGroups([(2, t) for t in []])  # no-op, kept for clarity
-        gmsh.model.addPhysicalGroup(2, solid_walls_faces, name="Solid_Walls")
-        print(f"  [OK] Solid_Walls now includes {len(solid_walls_faces)} surfaces\n")
+    if half_model:
+        y_origin = sym_coord if keep_positive else sym_coord - r_envelope
+        y_extent = r_envelope
+        print(f"Half model: symmetry plane y={sym_coord}, keeping "
+              f"{'positive' if keep_positive else 'negative'} side")
+        if not (body_bbox[1] < sym_coord < body_bbox[4]):
+            print("  Warning: the symmetry plane does not pass through the body")
+        elif abs(abs(body_bbox[1] - sym_coord) - abs(body_bbox[4] - sym_coord)) > 1.0:
+            print("  Warning: the body is not centred on the symmetry plane. "
+                  "A half model is only valid for a symmetric body.")
     else:
-        print("[OK] No unassigned surfaces\n")
+        y_origin = -r_envelope
+        y_extent = 2 * r_envelope
+        print("Half model disabled, meshing the full span")
 
-    print("=" * 80 + "\n")
+    if body_length > 0 and r_envelope / body_length > 1.5:
+        print(f"  Warning: far field radius is {r_envelope / body_length:.1f} body "
+              "lengths. At hypersonic speeds disturbances do not travel upstream, "
+              "so the domain can be much tighter. Shrinking it saves more cells "
+              "than the symmetry cut does.")
 
-    # ========================================================================
-    # 9. MESH PARAMETERS - GLOBAL BOUNDS ONLY (size field does the real work)
-    # ========================================================================
-    print("Step 9: Setting mesh parameters (from config file)...")
+    box_tag = gmsh.model.occ.addBox(x0, y_origin, -r_envelope,
+                                    length, y_extent, 2 * r_envelope)
+    gmsh.model.occ.synchronize()
+    if export_geometry_path:
+        export_step(export_geometry_path + ".2.step")
+    print(f"Far-field domain tag {box_tag}\n")
 
-    # These remain as safety bounds - the size field below is the primary
-    # control. Kept in the same order/position as the original script.
-    gmsh.option.setNumber("Mesh.MeshSizeMin", gmsh_params.get("Mesh.MeshSizeMin", 0.002))
-    gmsh.option.setNumber("Mesh.MeshSizeMax", gmsh_params.get("Mesh.MeshSizeMax", 0.15))
-    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", gmsh_params.get("Mesh.MeshSizeFromCurvature", 24))
+    # 5. Boolean cut, with verification and automatic escalation.
+    #
+    # Cutting a half-width box directly by a body that straddles the symmetry
+    # plane puts the box's own y=sym boundary exactly where the body's own
+    # parametric seam edge runs. OCC cannot split a seam edge, reports
+    # BOPAlgo_AlertNotSplittableEdge, and returns the box essentially
+    # unmodified: the tool solid is deleted by removeTool and no cavity is ever
+    # created. Nothing downstream detects that on its own, so every attempt is
+    # verified by volume here and the next strategy is tried automatically.
+    #
+    # Strategies, in order:
+    #   direct     cut the (possibly half) domain box by the body
+    #   two_stage  cut a full width box by the body first, which is a clean non
+    #              coincident boolean, then intersect with the half box so the
+    #              symmetry plane passes through an already formed cavity
+    #   full_model fall back to the full span domain, which is verified to cut
+    #              this class of geometry, at twice the cell count
+    min_fraction = geom_params.get("min_cut_volume_fraction", 1e-9)
+    half_box_volume = length * y_extent * 2 * r_envelope
+    full_box_volume = length * 2 * r_envelope * 2 * r_envelope
 
-    # 2D surface algorithm stays configurable (default 6 = Frontal-Delaunay).
-    gmsh.option.setNumber("Mesh.Algorithm", gmsh_params.get("Mesh.Algorithm", 6))
+    def cut_volume_check(reference_volume):
+        """Return (tags, removed_volume) against the box that strategy built."""
+        tags = [t for d, t in gmsh.model.getEntities(3)]
+        if not tags:
+            return tags, 0.0
+        fluid = sum(gmsh.model.occ.getMass(3, t) for t in tags)
+        return tags, reference_volume - fluid
 
-    # 3D algorithm - read from config like every other gmsh option, but
-    # defaults to HXT (10) if the config omits it, per the requirement to
-    # use HXT-Delaunay for 3D meshing only. HXT has no 2D counterpart, so
-    # this does not affect the 2D algorithm above. The config file
-    # (gmsh_config_sizefield.json) explicitly sets Mesh.Algorithm3D: 10 -
-    # if that is ever edited to something else, warn loudly so the change
-    # is visible rather than silent, since HXT is a project requirement.
-    algorithm_3d = gmsh_params.get("Mesh.Algorithm3D", 10)
-    if algorithm_3d != 10:
-        print(f"  [WARNING] Config requests Mesh.Algorithm3D={algorithm_3d}, which is NOT "
-              f"HXT (10) - this project requires HXT-Delaunay for 3D meshing.")
-    gmsh.option.setNumber("Mesh.Algorithm3D", algorithm_3d)
-    print(f"  [OK] Mesh.Algorithm3D = {algorithm_3d} (from config)")
+    def try_direct():
+        gmsh.model.occ.cut([(3, box_tag)], [(3, body_tag)],
+                           removeObject=True, removeTool=True)
+        gmsh.model.occ.synchronize()
+
+    def try_two_stage():
+        full_box = gmsh.model.occ.addBox(x0, -r_envelope, -r_envelope,
+                                         length, 2 * r_envelope, 2 * r_envelope)
+        half_box = gmsh.model.occ.addBox(x0, y_origin, -r_envelope,
+                                         length, y_extent, 2 * r_envelope)
+        gmsh.model.occ.synchronize()
+        cut_res, _ = gmsh.model.occ.cut([(3, full_box)], [(3, body_tag)],
+                                        removeObject=True, removeTool=True)
+        gmsh.model.occ.synchronize()
+        gmsh.model.occ.intersect(cut_res, [(3, half_box)],
+                                 removeObject=True, removeTool=True)
+        gmsh.model.occ.synchronize()
+
+    def try_full_model():
+        full_box = gmsh.model.occ.addBox(x0, -r_envelope, -r_envelope,
+                                         length, 2 * r_envelope, 2 * r_envelope)
+        gmsh.model.occ.synchronize()
+        gmsh.model.occ.cut([(3, full_box)], [(3, body_tag)],
+                           removeObject=True, removeTool=True)
+        gmsh.model.occ.synchronize()
+
+    all_strategies = {"direct": try_direct,
+                      "two_stage": try_two_stage,
+                      "full_model": try_full_model}
+    reference = {"direct": half_box_volume if half_model else full_box_volume,
+                 "two_stage": half_box_volume,
+                 "full_model": full_box_volume}
+
+    forced = geom_params.get("force_cut_strategy")
+    if forced:
+        if forced not in all_strategies:
+            print(f"Unknown force_cut_strategy '{forced}', expected one of "
+                  f"{sorted(all_strategies)}, aborting")
+            gmsh.finalize()
+            return False
+        strategies = [(forced, all_strategies[forced])]
+        print(f"Cut strategy forced to: {forced}")
+    else:
+        strategies = [("direct", try_direct)]
+        if half_model:
+            if geom_params.get("two_stage_half_cut", True):
+                strategies.append(("two_stage", try_two_stage))
+            if geom_params.get("allow_full_model_fallback", True):
+                strategies.append(("full_model", try_full_model))
+
+    fluid_volume_tags = []
+    used_strategy = None
+    for name, attempt in strategies:
+        # Each attempt needs a clean slate, since a failed boolean has already
+        # consumed the body via removeTool.
+        gmsh.model.remove()
+        gmsh.model.add("BWB_Spaceplane_Mesh")
+        shapes = gmsh.model.occ.importShapes(step_file)
+        gmsh.model.occ.synchronize()
+        if dilation != 1.0:
+            gmsh.model.occ.dilate(shapes, 0, 0, 0, dilation, dilation, dilation)
+            gmsh.model.occ.synchronize()
+        body_tag = [t for d, t in shapes if d == 3][0]
+        if angle_deg != 0.0:
+            if geom_params.get("rotation_by_CoM", False):
+                origin = gmsh.model.occ.getCenterOfMass(3, body_tag)
+            else:
+                origin = (0.0, 0.0, 0.0)
+            gmsh.model.occ.rotate([(3, body_tag)], origin[0], origin[1], origin[2],
+                                  0, 1, 0, angle_deg * math.pi / 180.0)
+            gmsh.model.occ.synchronize()
+        if name == "direct":
+            box_tag = gmsh.model.occ.addBox(x0, y_origin, -r_envelope,
+                                            length, y_extent, 2 * r_envelope)
+            gmsh.model.occ.synchronize()
+
+        print(f"Boolean cut, strategy '{name}'...")
+        try:
+            attempt()
+        except Exception as e:
+            print(f"  strategy '{name}' raised: {e}")
+            continue
+
+        ref = reference[name]
+        tags, removed = cut_volume_check(ref)
+        frac = removed / max(ref, 1e-30)
+        print(f"  volume(s) {tags}, material removed {removed:.4e} mm3 "
+              f"({100.0 * frac:.4f}% of the {ref:.4e} mm3 reference box)")
+        if tags and frac >= min_fraction:
+            fluid_volume_tags = tags
+            used_strategy = name
+            if name == "full_model":
+                half_model = False
+                y_origin = -r_envelope
+                y_extent = 2 * r_envelope
+                print("  Fell back to a full span domain. The symmetry plane "
+                      "cut could not be made on this geometry, so there is no "
+                      "symmetry marker and the cell count is about double.")
+            break
+        print(f"  strategy '{name}' removed no material, the body was not "
+              "subtracted. OCC usually reports BOPAlgo_AlertNotSplittableEdge "
+              "here, meaning a seam edge of the body lies in a boundary of the "
+              "cutting box.")
+
+    if not fluid_volume_tags:
+        print("Every boolean cut strategy failed, aborting.")
+        print("  The body is a valid solid (a full span box cuts it), so this "
+              "is a coincidence between the body's seam and the domain "
+              "boundary. Options: rebuild the brep so no surface seam lies on "
+              "the symmetry plane, or set allow_full_model_fallback true.")
+        gmsh.finalize()
+        return False
+
+    print(f"Boolean cut complete using '{used_strategy}', "
+          f"fluid volume(s): {fluid_volume_tags}")
+    if export_geometry_path:
+        export_step(export_geometry_path + ".3.step")
+    print()
+
+    # 6. Classify boundary faces, build physical groups
+    all_faces = []
+    for vol_tag in fluid_volume_tags:
+        bf = gmsh.model.getBoundary([(3, vol_tag)], combined=False, oriented=False)
+        all_faces.extend(tag for dim, tag in bf)
+    all_faces = list(set(all_faces))
+
+    x_inlet = x0
+    x_outlet = x0 + length
+    y_lo = y_origin
+    y_hi = y_origin + y_extent
+    z_lo, z_hi = -r_envelope, r_envelope
+    domain = (x_inlet, x_outlet, y_lo, y_hi, z_lo, z_hi)
+    tol = geom_params.get("far_field_face_tolerance_mm", 0.5)
+
+    print(f"Domain bounds: X=[{x_inlet:.0f},{x_outlet:.0f}] "
+          f"Y=[{y_lo:.0f},{y_hi:.0f}] Z=[{z_lo:.0f},{z_hi:.0f}] tol={tol}mm")
+    print(f"Faces on the fluid volume(s): {len(all_faces)}")
+
+    def flush(fmin, fmax, bound):
+        return abs(fmin - bound) < tol and abs(fmax - bound) < tol
+
+    verdicts = []
+    for face in all_faces:
+        fxmin, fymin, fzmin, fxmax, fymax, fzmax = gmsh.model.getBoundingBox(2, face)
+        if half_model and flush(fymin, fymax, sym_coord):
+            symmetry_faces.append(face)
+            why = "symmetry"
+        elif flush(fxmin, fxmax, x_inlet):
+            farfield_faces.append(face)
+            why = "farfield x_inlet"
+        elif flush(fxmin, fxmax, x_outlet):
+            farfield_faces.append(face)
+            why = "farfield x_outlet"
+        elif flush(fymin, fymax, y_lo):
+            farfield_faces.append(face)
+            why = "farfield y_lo"
+        elif flush(fymin, fymax, y_hi):
+            farfield_faces.append(face)
+            why = "farfield y_hi"
+        elif flush(fzmin, fzmax, z_lo):
+            farfield_faces.append(face)
+            why = "farfield z_lo"
+        elif flush(fzmin, fzmax, z_hi):
+            farfield_faces.append(face)
+            why = "farfield z_hi"
+        else:
+            why = "wall"
+        verdicts.append((face, (fxmin, fymin, fzmin, fxmax, fymax, fzmax), why))
+
+    wall_faces = list(set(all_faces) - set(farfield_faces) - set(symmetry_faces))
+
+    # Dump the inventory whenever anything looks wrong, so a failure names the
+    # faces and the test that caught them rather than only its own conclusion.
+    dump = (not wall_faces) or (half_model and not symmetry_faces) \
+        or geom_params.get("dump_face_classification", False)
+    if dump:
+        print("Face classification inventory:")
+        for face, bb, why in sorted(verdicts, key=lambda v: v[0]):
+            print(f"  face {face:4d}  X=[{bb[0]:9.1f},{bb[3]:9.1f}]  "
+                  f"Y=[{bb[1]:9.1f},{bb[4]:9.1f}]  Z=[{bb[2]:9.1f},{bb[5]:9.1f}]  "
+                  f"-> {why}")
+        print()
+
+    if not wall_faces:
+        print("No wall faces found after classification, aborting.")
+        print(f"  {len(all_faces)} faces total, {len(symmetry_faces)} symmetry, "
+              f"{len(farfield_faces)} farfield, 0 wall.")
+        if len(all_faces) <= 7:
+            print("  Only a handful of faces exist, so the domain is a bare box: "
+                  "the aircraft cavity is missing despite the volume check above. "
+                  "Inspect the .3.step export.")
+        else:
+            print("  Faces exist but every one matched a domain bound. Check the "
+                  "inventory above against the domain bounds, and check "
+                  "far_field_face_tolerance_mm is not larger than intended.")
+        gmsh.finalize()
+        return False
+    if half_model and not symmetry_faces:
+        print("Warning: half model enabled but no face lies on the symmetry plane. "
+              "Check symmetry_plane_y_mm and far_field_face_tolerance_mm.")
+
+    model_surfaces = [tag for dim, tag in gmsh.model.getEntities(2)]
+    unassigned = [t for t in model_surfaces if t not in set(all_faces)]
+    if unassigned:
+        wall_faces = list(set(wall_faces + unassigned))
+        print(f"Unassigned surfaces folded into {wall_name}: {unassigned}")
+
+    gmsh.model.addPhysicalGroup(2, wall_faces, name=wall_name)
+    if symmetry_faces:
+        gmsh.model.addPhysicalGroup(2, symmetry_faces, name=sym_name)
+    if farfield_faces:
+        gmsh.model.addPhysicalGroup(2, farfield_faces, name=farfield_name)
+    gmsh.model.addPhysicalGroup(3, fluid_volume_tags, 7, "fluid")
+    print(f"Physical groups: {wall_name}={len(wall_faces)} "
+          f"{sym_name}={len(symmetry_faces)} {farfield_name}={len(farfield_faces)}\n")
+
+    # 7. Mesh parameters
+    size_min = gmsh_params.get("Mesh.MeshSizeMin", 0.2)
+    size_max = gmsh_params.get("Mesh.MeshSizeMax", 1000.0)
+    size_far = size_params.get("size_far", 500.0)
+
+    # MeshSizeMax is a hard clamp applied after the background field. Verified
+    # by meshing a constant field of 50 under MeshSizeMax of 50, 25 and 10 and
+    # watching the element count rise from 100 to 4955. A MeshSizeMax below
+    # size_far silently overrides the field, so raise it rather than let the
+    # two numbers contradict each other.
+    if size_max < size_far:
+        print(f"MeshSizeMax {size_max} is below size_far {size_far} and would "
+              f"clamp it. Raising MeshSizeMax to {size_far}.")
+        size_max = size_far
+    gmsh.option.setNumber("Mesh.MeshSizeMin", size_min)
+    gmsh.option.setNumber("Mesh.MeshSizeMax", size_max)
+
+    curvature_nodes = gmsh_params.get("Mesh.MeshSizeFromCurvature", 24)
+    if curvature_nodes < 20:
+        print(f"Warning: MeshSizeFromCurvature={curvature_nodes} is below 20 nodes "
+              "per full circle. Note this option alone cannot fix a faceted nose, "
+              "since N nodes around a circle stays N however small the radius.")
+    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", curvature_nodes)
+
+    surface_algorithm = gmsh_params.get("Mesh.Algorithm", 6)
+    if surface_algorithm != 6:
+        print(f"Warning: Mesh.Algorithm={surface_algorithm}, Frontal-Delaunay (6) "
+              "is recommended for the blended surfaces")
+    gmsh.option.setNumber("Mesh.Algorithm", surface_algorithm)
 
     gmsh.option.setNumber("Mesh.Smoothing", gmsh_params.get("Mesh.Smoothing", 5))
     gmsh.option.setNumber("Mesh.ElementOrder", gmsh_params.get("Mesh.ElementOrder", 1))
     gmsh.option.setNumber("General.Terminal", gmsh_params.get("General.Terminal", 1))
-
-    # Critical: once a background field drives size, turn off the competing
-    # automatic size sources so they don't fight the field (this fighting is
-    # what caused the cone self-intersection loop previously).
-    # NOTE: MeshSizeFromCurvature is intentionally NOT zeroed here -- it was
-    # previously being set from config on line 594 and then unconditionally
-    # overwritten to 0 a few lines later, silently discarding the configured
-    # value and disabling curvature-based refinement everywhere (fuselage,
-    # nose, leading edges) even when the config explicitly asked for it.
-    # Unlike MeshSizeExtendFromBoundary/MeshSizeFromPoints, curvature sizing
-    # supplements the background field rather than competing with it, so it
-    # does not need to be disabled for the field to remain the primary driver.
     gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
     gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+    gmsh.option.setNumber("Mesh.Optimize", gmsh_params.get("Mesh.Optimize", 1))
+    gmsh.option.setNumber("Mesh.OptimizeNetgen", gmsh_params.get("Mesh.OptimizeNetgen", 1))
+    gmsh.option.setNumber("Mesh.OptimizeThreshold", gmsh_params.get("Mesh.OptimizeThreshold", 0.3))
 
-    print("[OK] Mesh parameters set (as global bounds; size field is primary control)\n")
+    # 8. Size fields
+    thresh_field = setup_size_field(wall_faces, size_params)
+    fields = [thresh_field]
+    boxes = []
 
-    # ========================================================================
-    # 9a. SIZE FIELD - fine near geometry, coarse far away, smooth transition
-    # ========================================================================
-    print("Step 9a: Building spatially-varying size field...")
+    nose = nose_box(nose_params, body_bbox, half_model, sym_coord)
+    if nose:
+        boxes.append(nose)
+        fields.append(setup_box_field("Nose", nose[0], nose[1], size_far, nose[2]))
 
-    dist_field, thresh_field = setup_size_field(solid_walls_faces, size_params)
+    shock = shock_box(shock_params, body_bbox, domain, half_model, sym_coord)
+    if shock:
+        boxes.append(shock)
+        fields.append(setup_box_field("Shock", shock[0], shock[1], size_far, shock[2]))
 
-    # Placeholder for future cavity refinement: pass surface tags for any
-    # mm-scale cavity surfaces here once the next STEP file has them. Empty
-    # list today means this is a no-op and behaves exactly like the base
-    # field alone.
-    cavity_surface_tags = size_params.get("cavity_surface_tags", [])
-    if len(cavity_surface_tags) > 0:
-        print(f"  [INFO] Cavity refinement requested for surfaces: {cavity_surface_tags}")
-        background_field = add_cavity_refinement_fields(
-            cavity_surface_tags, (dist_field, thresh_field), size_params
-        )
-        gmsh.model.mesh.field.setAsBackgroundMesh(background_field)
-        print(f"[OK] Background mesh field set (field id {background_field})\n")
+    cavity_tags = size_params.get("cavity_surface_tags", [])
+    if cavity_tags:
+        cav_dist = gmsh.model.mesh.field.add("Distance")
+        gmsh.model.mesh.field.setNumbers(cav_dist, "SurfacesList", cavity_tags)
+        gmsh.model.mesh.field.setNumber(cav_dist, "Sampling", 200)
+        cav_thresh = gmsh.model.mesh.field.add("Threshold")
+        gmsh.model.mesh.field.setNumber(cav_thresh, "InField", cav_dist)
+        gmsh.model.mesh.field.setNumber(cav_thresh, "SizeMin", size_params.get("cavity_size", 1.0))
+        gmsh.model.mesh.field.setNumber(cav_thresh, "SizeMax", size_far)
+        gmsh.model.mesh.field.setNumber(cav_thresh, "DistMin", 0)
+        gmsh.model.mesh.field.setNumber(cav_thresh, "DistMax", size_params.get("cavity_dist_max", 50))
+        gmsh.model.mesh.field.setNumber(cav_thresh, "Sigmoid", 1)
+        fields.append(cav_thresh)
+        print(f"Cavity refinement on {len(cavity_tags)} surfaces")
 
-    # ========================================================================
-    # 10. VISCOUS LAYER INFLATION - FROM CONFIG
-    # ========================================================================
-    print("Step 10: Configuring viscous boundary layers...")
-
-    bl_params = config.get('boundary_layer_parameters', {})
-
-    bl_field = gmsh.model.mesh.field.add("BoundaryLayer")
-    gmsh.model.occ.synchronize()
-
-    all_edges = []
-    for surf_id in solid_walls_faces:
-        try:
-            boundary = gmsh.model.getBoundary([(2, surf_id)], oriented=False)
-            edges = [tag for dim, tag in boundary if dim == 1]
-            all_edges.extend(edges)
-        except Exception as e:
-            print(f"  Warning: Could not get boundary for surface {surf_id}: {e}")
-
-    all_edges = list(set(all_edges))
-    print(f"  Found {len(all_edges)} boundary layer edges")
-
-    if all_edges and solid_walls_faces:
-        gmsh.model.mesh.field.setNumbers(bl_field, "EdgesList", all_edges)
-        #gmsh.model.mesh.field.setNumbers(bl_field, "FacesList", list(solid_walls_faces))
-        gmsh.model.mesh.field.setNumber(bl_field, "hwall_n", bl_params.get("Size", 0.002))
-        gmsh.model.mesh.field.setNumber(bl_field, "thickness", bl_params.get("Thickness", 0.0118))
-        gmsh.model.mesh.field.setNumber(bl_field, "ratio", bl_params.get("Ratio", 1.16))
-        gmsh.model.mesh.field.setNumber(bl_field, "NbLayers", bl_params.get("NbLayers", 45))
-        # BoundaryLayer field takes over as background mesh near walls; it
-        # does not conflict with the Threshold field used for the bulk
-        # domain because gmsh applies BoundaryLayer specially at walls.
-        gmsh.model.mesh.field.setAsBackgroundMesh(bl_field)
-        print("[OK] Viscous layers configured:")
-        print(f"    - Size: {bl_params.get('Size', 0.002)}")
-        print(f"    - Thickness: {bl_params.get('Thickness', 0.0118)}")
-        print(f"    - Stretch ratio: {bl_params.get('Ratio', 1.16)}")
-        print(f"    - Number of layers: {bl_params.get('NbLayers', 45)}\n")
+    if len(fields) > 1:
+        background = gmsh.model.mesh.field.add("Min")
+        gmsh.model.mesh.field.setNumbers(background, "FieldsList", fields)
     else:
-        print("[ERROR] Either edges or faces found for boundary layers\n")
+        background = thresh_field
+    gmsh.model.mesh.field.setAsBackgroundMesh(background)
+    print(f"Background field {background}, combining {len(fields)} field(s)\n")
 
-    # ========================================================================
-    # 11. MESH GENERATION (HXT for 3D only - see Step 9)
-    # ========================================================================
-    print("Step 11: Generating 3D mesh (HXT)...")
-    print("  This may take several minutes...\n")
+    # 9. Boundary layer
+    # Verified on gmsh 4.15.2: the BoundaryLayer field is 2D only. Attaching it
+    # to a closed 3D body and calling generate(3) aborts with
+    #   Only 2D Boundary Layers are supported (curve N is adjacent to 2 surfaces)
+    # so no version of this script ever produced prism layers, and no choice of
+    # option names will. SurfacesList is also not a valid option on that field
+    # type and raises on assignment.
+    #
+    # Consequence: this mesh is all tetrahedra, which is not adequate on its own
+    # for a Mach 10 wall heat flux. The realistic paths are to grow prisms with
+    # an external inflation tool on this surface mesh, to mesh in a
+    # boundary-layer-capable mesher, or to accept a wall-resolved isotropic
+    # near-wall size and the cell count that implies.
+    bl_enabled = bl_params.get("enable", False)
+    bl_half = bl_enabled and bool(symmetry_faces)
+    if bl_enabled:
+        print("Boundary layer: prism layers will be extruded after the surface "
+              "mesh, using gmsh.model.geo.extrudeBoundaryLayer.")
+        print("  Note this is not the BoundaryLayer size field, which is 2D "
+              "only and aborts generate(3).")
+        if bl_half:
+            print("  Half model: the symmetry plane is removed before meshing "
+                  "and rebuilt afterwards with the prism strip cut out.")
+        print()
 
+    # 10. Pre-flight element budget
+    estimated, volume_m3 = estimate_elements(domain, body_bbox, size_params,
+                                             boxes, size_min, size_max)
+    budget = util_params.get("max_element_budget", 40e6)
+    print(f"Element budget estimate: domain {volume_m3:.0f} m3, "
+          f"about {estimated:.3e} tets (budget {budget:.3e})")
+    print("  Upper bound only: wall distance is approximated by the body "
+          "bounding box, which for a slender or thin body counts much of the "
+          "bounding box interior as near-wall. Measured about 8x high on a "
+          "49 m slender test body, so calibrate max_element_budget from the "
+          "actual over estimate ratio this script prints after meshing.")
+    if estimated > budget:
+        print("  Aborting before meshing. This would not finish, or would "
+              "exhaust memory.")
+        print("  Reduce or disable the shock box, shrink the far field, or raise "
+              "size_near, size_in_mm and max_element_budget deliberately.")
+        gmsh.finalize()
+        return False
+    print()
+
+    # 11. 3D algorithm choice, driven by the estimate rather than a guess
+    algorithm_3d = gmsh_params.get("Mesh.Algorithm3D", "auto")
+    if isinstance(algorithm_3d, str) and algorithm_3d.lower() == "auto":
+        threshold = gmsh_params.get("hxt_element_threshold", 20e6)
+        algorithm_3d = 10 if estimated >= threshold else 4
+        print(f"Algorithm3D auto: estimate {estimated:.3e} vs threshold "
+              f"{threshold:.3e}, chosen {algorithm_3d}\n")
+    gmsh.option.setNumber("Mesh.Algorithm3D", algorithm_3d)
+
+    # 12. Generate, 2D first so nose resolution can be judged cheaply
+    surface_only = util_params.get("surface_mesh_only", False)
+
+    # The pre-layer volume is replaced by the prism blocks plus the tet region.
+    # Left in the model it is meshed a second time alongside them, doubling
+    # elements and memory, so it goes before any meshing happens. On a half
+    # model the symmetry face goes too: it must not be meshed over the strip
+    # the layers are about to occupy. Both are rebuilt after the extrusion.
+    sym_outer_curves = []
+    if bl_enabled and not surface_only:
+        if bl_half:
+            sym_outer_curves = [
+                t for d, t in gmsh.model.getBoundary(
+                    [(2, f) for f in symmetry_faces], combined=False,
+                    oriented=False)]
+            wall_edges = set(t for d, t in gmsh.model.getBoundary(
+                [(2, f) for f in wall_faces], combined=False, oriented=False))
+            sym_outer_curves = [c for c in sym_outer_curves
+                                if c not in wall_edges]
+        # The old symmetry group has to be identified before its entities go:
+        # once they are removed it stops appearing in getPhysicalGroups, yet it
+        # keeps its name reserved, and the rebuilt plane then cannot be given
+        # that name. It ends up in the .su2 as PhysicalSurface<n> instead.
+        old_sym_group = None
+        if bl_half:
+            for dim, tag in gmsh.model.getPhysicalGroups(2):
+                if gmsh.model.getPhysicalName(2, tag) == sym_name:
+                    old_sym_group = (dim, tag)
+                    break
+        try:
+            gmsh.model.removeEntities([(3, t) for t in fluid_volume_tags])
+            if bl_half:
+                if old_sym_group:
+                    gmsh.model.removePhysicalGroups([old_sym_group])
+                gmsh.model.removeEntities([(2, f) for f in symmetry_faces])
+                print(f"Removed the symmetry face(s) {symmetry_faces} before "
+                      f"meshing, outline kept as {len(sym_outer_curves)} "
+                      "curve(s)")
+            print(f"Removed the pre-layer fluid volume(s) {fluid_volume_tags}, "
+                  "superseded by the layers\n")
+        except Exception as e:
+            print(f"Could not clear the pre-layer entities: {e}")
+            print("  Disabling the boundary layer rather than meshing the "
+                  "domain twice.\n")
+            bl_enabled = bl_half = False
+
+    print("Generating 2D surface mesh...")
+    try:
+        gmsh.model.mesh.generate(2)
+        print("Surface mesh complete\n")
+        report_surface_mesh(wall_faces, body_bbox, nose_params)
+    except Exception as e:
+        print(f"Surface mesh generation failed: {e}")
+        gmsh.finalize()
+        return False
+
+    if surface_only:
+        # Never export a surface-only mesh as .su2: the solver rejects a mesh
+        # with no volume elements, and a half-valid .su2 is worse than none.
+        print("surface_mesh_only is set, writing the surface mesh only.")
+        surf_path = output_path.replace('.msh', '_surface.msh')
+        try:
+            gmsh.option.setNumber("Mesh.MshFileVersion",
+                                  gmsh_params.get("Mesh.MshFileVersion", 2.2))
+            gmsh.write(surf_path)
+            print(f"Surface mesh written: {surf_path}")
+            print("Inspect the nose, then set surface_mesh_only to false.\n")
+        except Exception as e:
+            print(f"Surface mesh write failed: {e}\n")
+        gmsh.finalize()
+        return True
+
+    # 12b. Prism boundary layer, between the 2D and 3D passes.
+    #
+    # The order is the whole trick: extrudeBoundaryLayer works off the existing
+    # surface mesh, so it cannot run before generate(2), and the tet fill has
+    # to see the extruded outer surface, so it cannot run after generate(3).
+    bl_volumes, sym_laterals = [], []
+    if bl_enabled:
+        # Prism count is wall triangles times layers, known exactly now that
+        # the surface mesh exists. This is the number that decides whether a
+        # viscous mesh fits, and it dwarfs the tet estimate made before meshing.
+        n_wall_tri = 0
+        for f in wall_faces:
+            try:
+                et, eg, _ = gmsh.model.mesh.getElements(2, f)
+                n_wall_tri += sum(len(g) for t, g in zip(et, eg) if t == 2)
+            except Exception:
+                pass
+        heights_preview = bl_heights(bl_params)
+        n_layers = len(heights_preview)
+        n_prism = n_wall_tri * n_layers
+        print(f"Prism budget: {n_wall_tri} wall triangles x {n_layers} layers "
+              f"= {n_prism:.3e} prisms, before any tet")
+        if n_prism > budget:
+            print(f"  Aborting: that alone exceeds max_element_budget "
+                  f"({budget:.3e}). Coarsen the wall mesh, cut NbLayers, or "
+                  "raise the budget deliberately.")
+            gmsh.finalize()
+            return False
+
+        # Projected grand total: prisms (known exactly, from the real surface
+        # mesh) plus the pre-flight tet estimate from step 10. That estimate
+        # is documented as reading up to 8x high on a slender body, since it
+        # approximates wall distance with the body's bounding box, which for
+        # a thin body misclassifies much of the box interior as near-wall.
+        # Report both ends rather than one number that hides which side the
+        # uncertainty is on.
+        projected_low = n_prism + estimated / 8.0
+        projected_high = n_prism + estimated
+        print(f"Projected total with boundary layer: prisms {n_prism:.3e} + "
+              f"tet fill {estimated:.3e} (pre-flight estimate)")
+        print(f"  Realistic range {projected_low:.3e} to {projected_high:.3e}, "
+              "given the estimator's own up-to-8x slender-body bias. The "
+              "actual count after generate(3) will land somewhere in this "
+              "range, not necessarily the middle.")
+        if projected_high > budget:
+            print(f"  Warning: the high end exceeds max_element_budget "
+                  f"({budget:.3e}). The prism check above did not catch this "
+                  "because it only tests the prisms alone; this mesh may "
+                  "still exhaust memory or fail to finish even though that "
+                  "earlier check passed.")
+
+        print("Extruding prism boundary layer...")
+        try:
+            ok, outer, bl_volumes, sym_laterals, strip_curves = \
+                build_prism_layers(wall_faces, farfield_faces, symmetry_faces,
+                                   bl_params, sym_coord, tol,
+                                   heights=heights_preview)
+        except Exception as e:
+            print(f"Boundary layer extrusion failed: {e}")
+            gmsh.finalize()
+            return False
+
+        if ok:
+            try:
+                if bl_half:
+                    if not strip_curves:
+                        raise RuntimeError(
+                            "no strip edge found on the symmetry plane, so the "
+                            "plane cannot be rebuilt around the layers")
+                    new_sym = rebuild_symmetry_plane(sym_outer_curves,
+                                                     strip_curves)
+                    # the rebuilt plane still needs its own surface mesh
+                    gmsh.model.mesh.generate(2)
+                    outer = outer + new_sym
+
+                loop = gmsh.model.geo.addSurfaceLoop(outer)
+                outer_volume = gmsh.model.geo.addVolume([loop])
+                gmsh.model.geo.synchronize()
+
+                # After the synchronize, not before: a group created earlier
+                # comes back unnamed and SU2 gets a marker called
+                # PhysicalSurface<n> instead of the configured name.
+                if bl_half:
+                    gtag = gmsh.model.addPhysicalGroup(2, new_sym + sym_laterals)
+                    gmsh.model.setPhysicalName(2, gtag, sym_name)
+                    print(f"  Symmetry marker '{sym_name}': {len(new_sym)} "
+                          f"rebuilt surface(s) plus {len(sym_laterals)} strip "
+                          "face(s)")
+            except Exception as e:
+                print(f"Could not close the outer volume: {e}")
+                gmsh.finalize()
+                return False
+
+            fluid_volume_tags = bl_volumes + [outer_volume]
+            # gmsh reads removePhysicalGroups([]) as "remove every group", which
+            # silently takes the wall and farfield markers with it and writes a
+            # .su2 with no NMARK section, so guard the empty case.
+            stale = gmsh.model.getPhysicalGroups(3)
+            if stale:
+                gmsh.model.removePhysicalGroups(stale)
+            gmsh.model.addPhysicalGroup(3, fluid_volume_tags, -1, "fluid")
+            print(f"  Fluid is now {len(bl_volumes)} prism block(s) plus the "
+                  f"tet region\n")
+
+    if dry_run:
+        # extrudeBoundaryLayer only builds the geometric entities; the prism
+        # elements themselves are not realized until generate(3), which is the
+        # same call that fills the tets. So there is no "real" prism count to
+        # read back here that is cheaper than just running the tet fill. What
+        # dry-run buys instead: the surface mesh is real (not estimated), the
+        # prism budget above is an exact count from that real mesh (not the
+        # estimate the pre-flight check uses), and on a half model the
+        # symmetry plane rebuild has actually run and would have raised by now
+        # if the layers do not fit the geometry. Only the tet fill stays an
+        # estimate.
+        try:
+            et, eg, _ = gmsh.model.mesh.getElements(2)
+            n_surf = sum(len(g) for g in eg)
+        except Exception:
+            n_surf = 0
+        print(f"DRY RUN stopping here. Real surface mesh: {n_surf} elements.")
+        if bl_enabled:
+            print(f"  Prism count above ({n_prism:.3e}) is exact, from this "
+                  "real surface mesh, not the pre-flight estimate.")
+        print("  Tet fill is still only the pre-flight estimate above -- that "
+              "part has not run. Remove dry_run (or --dry-run) to generate "
+              "it.\n")
+        gmsh.finalize()
+        return True
+
+    print("Generating 3D mesh...")
     try:
         gmsh.model.mesh.generate(3)
-        print("[OK] Mesh generation complete\n")
-        mesh_success = True
+        print("Mesh generation complete\n")
     except Exception as e:
-        print(f"[ERROR] Mesh generation failed: {e}\n")
-        mesh_success = False
+        print(f"3D mesh generation failed: {e}")
+        if bl_volumes:
+            print("  With prism layers active, the usual cause is layers "
+                  "colliding where the body is thin or concave: the sharp "
+                  "trailing edge first. Reduce NbLayers or Thickness, or "
+                  "coarsen the wall mesh there.")
+        gmsh.finalize()
+        return False
 
-    # ========================================================================
-    # 12. EXPORT
-    # ========================================================================
-    if mesh_success:
-        print("Step 12: Exporting mesh...")
-        try:
-            gmsh.option.setNumber("Mesh.MshFileVersion", gmsh_params.get("Mesh.MshFileVersion", 2.2))
-            gmsh.write(output_path)
-            file_size = os.path.getsize(output_path)
+    try:
+        etypes, etags, _ = gmsh.model.mesh.getElements(3)
+        n_elem = sum(len(t) for t in etags)
+        names = {4: "tet", 5: "hex", 6: "prism", 7: "pyramid"}
+        breakdown = {names.get(t, t): len(g) for t, g in zip(etypes, etags)}
+        print(f"Element types: {breakdown}")
+        n_node = len(gmsh.model.mesh.getNodes()[0])
+        print(f"Volume elements={n_elem} nodes={n_node}")
+        print(f"  estimate was {estimated:.3e}, actual over estimate "
+              f"{n_elem / max(estimated, 1.0):.2f}\n")
+    except Exception:
+        pass
 
-            if util_params.get("export_su2", False):
-                # 12.1. Pull absolute list of all node tags across all dimensions (1D, 2D, and 3D)
-                node_tags, coords, _ = gmsh.model.mesh.getNodes()
+    if not report_quality_mixed(gmsh_params.get("quality_abort_threshold", 0.01)):
+        if util_params.get("abort_on_bad_quality", True):
+            print("Aborting before export on mesh quality.")
+            gmsh.finalize()
+            return False
 
-                # 12.2. Bulk multiply the raw coordinates uniformly (e.g., mm -> m)
-                scaled_coords = np.array(coords) * util_params.get("su2_dilation_factor", 1e-3)
-                print(f"Scaling all nodes by a factor of {util_params.get('su2_dilation_factor', 1e-3)} (mm to m). Total nodes: {len(node_tags)}")
+    # 13. Export
+    try:
+        gmsh.option.setNumber("Mesh.MshFileVersion",
+                              gmsh_params.get("Mesh.MshFileVersion", 2.2))
+        gmsh.write(output_path)
+        print(f"Mesh exported: {output_path} "
+              f"({os.path.getsize(output_path) / 1024 / 1024:.2f} MB)")
 
-                # 12.3. Update the positions of all individual nodes in Gmsh's database
-                for tag, coord in zip(node_tags, scaled_coords.reshape(-1, 3)):
-                    gmsh.model.mesh.setNode(tag, coord.tolist(), [])
+        if util_params.get("enable_su2_export", False):
+            factor = util_params.get("su2_dilation_factor", 1e-3)
+            # One call, not a Python loop over every node in the mesh.
+            gmsh.model.mesh.affineTransform([factor, 0, 0, 0,
+                                             0, factor, 0, 0,
+                                             0, 0, factor, 0])
+            su2_path = output_path.replace('.msh', '.su2')
+            gmsh.write(su2_path)
+            print(f"SU2 mesh exported, nodes scaled by {factor}: {su2_path}")
+            print("SU2 config markers:")
+            print(f"  MARKER_HEATFLUX= ( {wall_name}, 0.0 )")
+            print(f"    or MARKER_ISOTHERMAL= ( {wall_name}, T_wall ) for a fixed wall temp")
+            print(f"  MARKER_SYM= ( {sym_name} )")
+            print(f"  MARKER_FAR= ( {farfield_name} )")
+            print("  There is no MARKER_WALL or MARKER_FARFIELD keyword in SU2.")
+        print()
+    except Exception as e:
+        print(f"Export failed: {e}\n")
+        gmsh.finalize()
+        return False
 
-                gmsh.model.geo.synchronize()
-                gmsh.write(output_path.replace('.msh', '.su2'))
-
-            print(f"[OK] Mesh exported successfully")
-            print(f"  File: {output_path}")
-            print(f"  Size: {file_size / 1024 / 1024:.2f} MB\n")
-        except Exception as e:
-            print(f"[ERROR] Export failed: {e}\n")
-    else:
-        print("Skipping export - mesh generation failed\n")
-
-    # ========================================================================
-    # 13. CLEANUP
-    # ========================================================================
-    print("Step 13: Finalizing...")
     gmsh.finalize()
-    print("[OK] Done\n")
-
-    print("=" * 80)
-    if mesh_success:
-        print("MESH GENERATION SUCCESSFUL")
-        print("=" * 80)
-        print("\nNext steps:")
-        print("  1. Verify mesh quality in Gmsh GUI")
-        print("  2. Check that inlet/outlet are correctly assigned")
-        print("  3. Import mesh into your CFD solver")
-    else:
-        print("MESH GENERATION FAILED")
-        print("=" * 80)
-        print("\nTroubleshooting:")
-        print("  1. Check size_field_parameters in config (size_near/size_far/dist_min/dist_max)")
-        print("  2. Verify solid_walls_faces list is non-empty before Step 9a")
-        print("  3. Check disk space (mesh is MBs to GB)")
-
-    print("=" * 80 + "\n")
-
+    print("Mesh generation successful")
     return True
 
 
 if __name__ == "__main__":
-    config_file = sys.argv[1] if len(sys.argv) > 1 else 'gmsh_config.json'
-    success = create_mesh(config_file)
-    sys.exit(0 if success else 1)
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    flags = [a for a in sys.argv[1:] if a.startswith('--')]
+    cfg = args[0] if args else 'gmsh_config.json'
+    sys.exit(0 if create_mesh(cfg, dry_run='--dry-run' in flags) else 1)

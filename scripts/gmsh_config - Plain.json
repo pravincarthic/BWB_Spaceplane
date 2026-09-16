@@ -1,6 +1,6 @@
 {
- "step_file": "D:\\BWB_git\\BWB_Spaceplane\\Design\\BWB_Spaceplane_v4_cavity_20260908.brep",
- "output_file": "D:\\BWB_git\\BWB_Spaceplane\\Output\\CavityBWB_mesh\\Gmsh_cavity_half_AoA_neg5_20260916.msh",
+ "step_file": "D:\\BWB_git\\BWB_Spaceplane\\Design\\BWB_Spaceplane_V2_20260822.brep",
+ "output_file": "D:\\BWB_git\\BWB_Spaceplane\\Output\\PlainBWB_mesh\\Gmsh_half_AoA_neg5_20260916_coarse.msh",
  "export_geometry_path": null,
  "gmsh_parameters": {
   "Mesh.RandomFactor": 1e-05,
@@ -21,10 +21,10 @@
   "General.Terminal": 1
  },
  "geometry_parameters": {
-  "rotation_angle_deg": 0,
+  "rotation_angle_deg": -5,
   "rotation_by_CoM": false,
   "test_for_CoM_only": false,
-  "uniform_dilation_factor": 1.0,
+  "uniform_dilation_factor": 1000.0,
   "enable_symmetry_half_model": false,
   "symmetry_plane_y_mm": 0.0,
   "symmetry_keep_positive_side": true,

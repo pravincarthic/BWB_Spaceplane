@@ -1,0 +1,5 @@
+cd "D:\BWB_git\BWB_Spaceplane\scripts"
+d:
+set PYTHONUNBUFFERED=1
+
+python3 final_meshing.py gmsh_config.json > ..\Output\CavityBWB_mesh\Cavity_BWB_log.log 2>&1
